@@ -2,7 +2,6 @@ mod assets;
 mod connection_form;
 mod console;
 mod data_sources;
-mod demo;
 mod explorer;
 mod results;
 mod runtime;
@@ -21,6 +20,7 @@ fn main() {
         .run(|cx| {
             gpui_kit::init(cx);
             theme::apply(cx);
+            console::init(cx);
 
             let bounds = Bounds::centered(None, size(px(1360.), px(860.)), cx);
             let options = WindowOptions {

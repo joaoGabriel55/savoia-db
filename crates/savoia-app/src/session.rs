@@ -4,16 +4,23 @@
 use std::sync::Arc;
 
 use savoia_core::{
-    AppError, AppResult, Catalog, Connection, ConnectionConfig, Driver, Engine, Secrets, ServerInfo,
+    AppError, AppResult, Catalog, Connection, ConnectionConfig, Driver, Engine, QueryEvent,
+    QueryHandle, Secrets, ServerInfo,
 };
 use savoia_mysql::MysqlDriver;
 use savoia_pg::PgDriver;
 use savoia_tunnel::{HostKeyPolicy, KnownHosts, Tunnel};
+use tokio::sync::{Mutex, OwnedMutexGuard};
+
+use crate::runtime;
 
 pub struct Session {
     pub catalog: Catalog,
-    // Held for future query execution (M2); dropping it closes the session.
-    _conn: Arc<dyn Connection>,
+    // Dropping it closes the session.
+    conn: Arc<dyn Connection>,
+    /// One operation at a time on `conn`. See
+    /// `docs/adr/202610091309-serialize-all-work-on-one-connection-per-session.md`.
+    gate: Arc<Mutex<()>>,
     // Dropped after the connection; keeps the forward alive meanwhile.
     _tunnel: Option<Tunnel>,
 }
@@ -56,9 +63,54 @@ pub async fn open(
     let catalog = conn.catalog().await?;
     Ok(Session {
         catalog,
-        _conn: Arc::from(conn),
+        conn: Arc::from(conn),
+        gate: Arc::default(),
         _tunnel: tunnel,
     })
+}
+
+impl Session {
+    /// Waits for the gate, then starts `sql`. The gate stays taken until the
+    /// returned query ends. Runs on the I/O runtime.
+    pub async fn execute(&self, sql: String) -> AppResult<RunningQuery> {
+        let guard = self.gate.clone().lock_owned().await;
+        let handle = self.conn.execute(sql).await?;
+        Ok(RunningQuery {
+            inner: Some((handle, guard)),
+        })
+    }
+}
+
+/// A query that holds its session's gate. Dropping it before the end cancels
+/// the query and keeps the gate until the driver has drained it.
+pub struct RunningQuery {
+    inner: Option<(QueryHandle, OwnedMutexGuard<()>)>,
+}
+
+impl RunningQuery {
+    /// The next event, or `None` once the execution has ended. After `None`
+    /// (or an `Err`) the gate is free.
+    pub async fn next(&mut self) -> Option<AppResult<QueryEvent>> {
+        let (handle, _) = self.inner.as_mut()?;
+        let event = handle.next().await;
+        if matches!(event, None | Some(Err(_))) {
+            self.inner = None;
+        }
+        event
+    }
+}
+
+impl Drop for RunningQuery {
+    fn drop(&mut self) {
+        let Some((mut handle, guard)) = self.inner.take() else {
+            return;
+        };
+        drop(runtime::spawn(async move {
+            drop(handle.cancel_handle().cancel().await);
+            while handle.next().await.is_some() {}
+            drop(guard);
+        }));
+    }
 }
 
 /// Connects, reads the server version and disconnects.

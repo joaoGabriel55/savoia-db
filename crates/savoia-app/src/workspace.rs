@@ -34,8 +34,10 @@ impl Workspace {
             cx.observe(&data_sources, |_, _, cx| cx.notify()),
             cx.subscribe_in(&data_sources, window, Self::on_data_source_event),
         ];
+        let console =
+            cx.new(|cx| QueryConsole::new(data_sources.clone(), explorer.clone(), window, cx));
         Self {
-            console: cx.new(|cx| QueryConsole::new(window, cx)),
+            console,
             data_sources,
             explorer,
             _subscriptions: subscriptions,

@@ -587,6 +587,12 @@ impl Render for Explorer {
 
 #[cfg(test)]
 impl Explorer {
+    /// Selects the first row: the first data source.
+    pub fn select_first_source(&mut self, cx: &mut Context<Self>) {
+        self.tree
+            .update(cx, |tree, cx| tree.set_selected_index(Some(0), cx));
+    }
+
     /// Labels of the rows a user would see (expanded paths only), depth-first.
     pub fn visible_labels(&self) -> Vec<String> {
         fn walk(items: &[TreeItem], out: &mut Vec<String>) {
