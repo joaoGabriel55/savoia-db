@@ -1,4 +1,4 @@
-# Savoia DB
+# Savoia Studio
 
 A lightweight but feature-rich desktop database client for PostgreSQL and MySQL. 100% Rust, with a native GPU-rendered UI built on [GPUI Kit](https://gpui-kit.com). No webview.
 
@@ -8,7 +8,7 @@ See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/adr/](docs/adr/README
 
 | Path | What |
 | --- | --- |
-| `crates/savoia-app` | The app binary (`savoia-db`): GPUI views, theme, icon assets |
+| `crates/savoia-app` | The app binary (`savoia-studio`): GPUI views, theme, icon assets |
 | `crates/savoia-core` | Domain types, connection config + URL import, driver traits, errors; no UI dependency |
 | `crates/savoia-pg` | PostgreSQL driver (tokio-postgres, rustls) |
 | `crates/savoia-mysql` | MySQL/MariaDB driver (mysql_async, rustls) |

@@ -1,4 +1,4 @@
-# Savoia DB: build plan
+# Savoia Studio: build plan
 
 A lightweight but rich, cross-platform desktop database client. MySQL and PostgreSQL come first. 100% Rust, with a native GPU-rendered UI (GPUI Kit). DataGrip-style IDE layout with Beekeeper-style connection flow and Savoia's own branding.
 
@@ -23,7 +23,7 @@ Decisions behind this plan live in [`docs/adr/`](./adr/README.md).
 ## 2. Architecture
 
 ```
-savoia-db/
+savoia-studio/
 ├─ Cargo.toml                 # workspace; gpui-kit pinned exactly
 ├─ crates/
 │  ├─ savoia-app/             # binary: GPUI views (workspace, explorer, console, results, dialogs), theme, assets
@@ -112,4 +112,4 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 
 - Bundle pg_dump/mysqldump binaries per OS, or only detect them?
 - Packaging/updater tool now that Tauri is gone.
-- App naming, license, and update/distribution channel.
+- License, and update/distribution channel.

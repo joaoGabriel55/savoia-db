@@ -656,3 +656,37 @@ async fn memory_benchmark(cx: &mut TestAppContext) {
         last = *bytes;
     }
 }
+
+/// "Open data" adds its SELECT after the user's SQL and runs only that.
+#[gpui_kit::test]
+async fn postgres_open_data_keeps_the_users_sql(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    let object = crate::table_menu::ObjectRef::parse(
+        &format!(
+            "table:{}/postgres/pg_catalog/pg_namespace",
+            savoia_core::ConnectionId::new()
+        ),
+        savoia_core::Engine::Postgres,
+    )
+    .unwrap();
+    cx.update_window(window, |_, window, cx| {
+        let editor = console.read(cx).editor().clone();
+        editor.update(cx, |e, cx| e.set_value("SELECT 1 AS mine;", window, cx));
+        console.update(cx, |c, cx| {
+            c.insert_sql(&object.select_sql(), true, window, cx)
+        });
+    })
+    .unwrap();
+    idle(cx, &console);
+
+    let text = console.read_with(cx, |c, cx| c.editor().read(cx).value().to_string());
+    assert_eq!(
+        text,
+        "SELECT 1 AS mine;\n\nSELECT * FROM \"pg_catalog\".\"pg_namespace\" LIMIT 200;"
+    );
+    assert_eq!(console.read_with(cx, |c, _| c.results().len()), 1);
+    assert!(grid(cx, &console).0 > 1);
+}

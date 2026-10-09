@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::tree::{TreeEntry, TreeEvent, TreeItem, TreeState, tree};
@@ -24,6 +24,7 @@ use crate::data_sources::{
     DataSources, DataSourcesEvent, LoadState, LoadTarget, RefreshState, SourceState,
 };
 use crate::session::Session;
+use crate::table_menu::{self, ObjectRef, Origin, TableAction};
 use crate::theme::{self, BandDisabled as _};
 
 /// Per-source decoration for the tree rows.
@@ -114,6 +115,14 @@ impl NodeRef {
 
 pub enum ExplorerEvent {
     ShowDiagram(NodeRef),
+    /// SQL for the query console.
+    Sql {
+        sql: String,
+        /// Run it now, or only place it in the editor.
+        run: bool,
+        /// A catalog to refresh once the statement has been sent.
+        refresh: Option<ConnectionId>,
+    },
 }
 
 /// Builds the tree rows of one connected source, noting what each row
@@ -575,6 +584,121 @@ impl Explorer {
         self.data_sources.update(cx, |ds, cx| ds.refresh(id, cx));
     }
 
+    /// Runs an action from the table menu. The row is selected first, since
+    /// the console runs against the explorer's selection.
+    fn table_action(
+        &mut self,
+        row: SharedString,
+        object: ObjectRef,
+        action: TableAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.tree.update(cx, |tree, cx| {
+            tree.set_selected_item(Some(&TreeItem::new(row.clone(), "")), cx)
+        });
+        let sql = |sql: String, run| ExplorerEvent::Sql {
+            sql,
+            run,
+            refresh: None,
+        };
+        match action {
+            TableAction::OpenData => cx.emit(sql(object.select_sql(), true)),
+            TableAction::NewSelect => cx.emit(sql(object.select_sql(), false)),
+            TableAction::ShowDiagram => {
+                if let Some(node) = self.nodes.get(&row).cloned() {
+                    self.show_diagram(node, cx);
+                }
+            }
+            TableAction::CopyName => {
+                cx.write_to_clipboard(ClipboardItem::new_string(object.name.clone()))
+            }
+            TableAction::CopyQualifiedName => {
+                cx.write_to_clipboard(ClipboardItem::new_string(object.qualified_name()))
+            }
+            TableAction::Truncate | TableAction::Drop => {
+                self.confirm_destructive(object, action, window, cx)
+            }
+        }
+    }
+
+    /// Shows the exact statement and where it runs; nothing runs until OK.
+    fn confirm_destructive(
+        &mut self,
+        object: ObjectRef,
+        action: TableAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection) = self
+            .data_sources
+            .read(cx)
+            .get(object.connection)
+            .map(|c| c.display_name())
+        else {
+            return;
+        };
+        let drop = action == TableAction::Drop;
+        let (sql, title, ok, consequence) = if drop {
+            let noun = object.kind.noun();
+            (
+                object.drop_sql(),
+                format!("Drop {noun} “{}”?", object.name),
+                format!("Drop {noun}"),
+                format!("The {noun} and everything in it are removed. This can't be undone."),
+            )
+        } else {
+            (
+                object.truncate_sql(),
+                format!("Truncate “{}”?", object.name),
+                "Truncate".to_string(),
+                "Every row is deleted; the table itself stays. This can't be undone.".to_string(),
+            )
+        };
+        let this = cx.entity().downgrade();
+        let refresh = drop.then_some(object.connection);
+        window.open_alert_dialog(cx, move |alert, _, cx| {
+            let theme = cx.theme();
+            let this = this.clone();
+            let run = sql.clone();
+            alert
+                .icon(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
+                .title(title.clone())
+                .description(
+                    v_flex()
+                        .gap_3()
+                        .child(format!("Runs on {connection}. {consequence}"))
+                        .child(
+                            div()
+                                .p_2()
+                                .rounded(px(6.))
+                                .border_1()
+                                .border_color(theme.border)
+                                .bg(theme.background)
+                                .font_family("monospace")
+                                .text_sm()
+                                .text_color(theme.foreground)
+                                .child(sql.clone()),
+                        ),
+                )
+                .show_cancel(true)
+                .ok_text(ok.clone())
+                .ok_variant(ButtonVariant::Danger)
+                .on_ok(move |_, _, cx| {
+                    let sql = run.clone();
+                    this.update(cx, |_, cx| {
+                        cx.emit(ExplorerEvent::Sql {
+                            sql,
+                            run: true,
+                            refresh,
+                        })
+                    })
+                    .ok();
+                    true
+                })
+        });
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected_connection(cx);
         let node = self.selected_node(cx);
@@ -856,11 +980,39 @@ impl Render for Explorer {
                                         }),
                                 )
                         })
-                        .context_menu(move |_, entry, menu, _, _| {
-                            let Some(id) = connection_of(&entry.item().id) else {
+                        .context_menu(move |_, entry, menu, _, cx| {
+                            let row = entry.item().id.clone();
+                            let Some(id) = connection_of(&row) else {
                                 return menu;
                             };
                             let target = menu_target.clone();
+                            let table = target.upgrade().and_then(|explorer| {
+                                let ds = explorer.read(cx).data_sources.read(cx);
+                                let config = ds.get(id)?;
+                                let object = ObjectRef::parse(&row, config.engine)?;
+                                let origin = Origin {
+                                    name: config.display_name(),
+                                    color: config.color.map(|c| c.rgb()),
+                                    read_only: config.read_only,
+                                };
+                                Some((object, origin))
+                            });
+                            if let Some((object, origin)) = table {
+                                let picked = object.clone();
+                                return table_menu::build(
+                                    menu,
+                                    &object,
+                                    &origin,
+                                    move |action, window, cx| {
+                                        let (row, object) = (row.clone(), picked.clone());
+                                        target
+                                            .update(cx, |this, cx| {
+                                                this.table_action(row, object, action, window, cx)
+                                            })
+                                            .ok();
+                                    },
+                                );
+                            }
                             let item = |label: &'static str,
                                         f: fn(
                                 &mut Explorer,

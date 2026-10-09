@@ -1,6 +1,6 @@
 [package]
 name = "savoia-mysql"
-description = "MySQL / MariaDB driver for Savoia DB (mysql_async)."
+description = "MySQL / MariaDB driver for Savoia Studio (mysql_async)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

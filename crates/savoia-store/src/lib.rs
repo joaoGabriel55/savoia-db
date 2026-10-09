@@ -136,6 +136,8 @@ impl ConnectionStore {
 
 fn data_dir() -> AppResult<PathBuf> {
     let dir = dirs::data_dir().ok_or_else(|| AppError::storage("no user data directory"))?;
+    // Kept from the Savoia DB name so existing installs keep their
+    // connections and saved passwords.
     Ok(dir.join("savoia-db"))
 }
 

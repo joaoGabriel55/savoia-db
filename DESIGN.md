@@ -1,5 +1,5 @@
 ---
-name: Savoia DB
+name: Savoia Studio
 description: A graphite IDE named by flat Ivrea-green zone bands, with one Savoy-blue Run.
 colors:
   ivrea-green: "#1F5A43"
@@ -128,7 +128,7 @@ components:
     size: "6px"
 ---
 
-# Design System: Savoia DB
+# Design System: Savoia Studio
 
 ## Overview
 
@@ -254,6 +254,12 @@ Flat and quiet. Color does the work; there is no gloss.
 ### Result Grid
 - Borderless data table on graphite canvas. Header in Graphite Panel with Header Ink. Rows separated by Graphite Rule, hover in Row Hover, selection in Selection, active cell outlined in Ivrea Line. A fixed 44px row-number column on the left.
 - **Empty state:** one muted body line ("Run a query (⌘↩) to see results.").
+
+### Context Menus
+- **Table and view menu** (`table_menu.rs`): an identity header first, then short groups with the most used action nearest the pointer and destructive ones last. The header shows the name in Title weight, its kind in a muted caption, and a caption line with the path (`db › schema`), the connection's tag-colored dot and name, and "read-only" in saffron when it applies.
+- **Rows:** a muted 16px icon, the label in Ink, and an optional right-aligned muted caption hint, such as "first 200 rows", the qualified name, or a milestone tag ("M2", "M4") on disabled future actions. Future actions stay visible and disabled rather than hidden.
+- **Danger:** Truncate and Drop use vermilion ink for both icon and label, and are disabled with a "read-only" hint on read-only connections. They never run from the menu: a confirm dialog shows the connection and the exact statement in Data Mono, with a vermilion Danger OK button.
+- Menu actions that produce SQL add it after the console's text and select it, so a run takes just that statement and the user's own SQL stays.
 
 ### SQL Editor
 - Editor Mono on Graphite Canvas. The syntax palette overrides GPUI Kit's default dark highlight theme in `theme.rs` (`SYNTAX`) so no token is blue, following the Run-Only Blue Rule.

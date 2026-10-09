@@ -142,6 +142,41 @@ impl QueryConsole {
         }
     }
 
+    /// Adds `sql` after what's in the editor and selects it, so a run takes
+    /// just this statement and the user's own SQL stays put (and undoable).
+    pub fn insert_sql(
+        &mut self,
+        sql: &str,
+        run: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if run && self.running.is_some() {
+            window.push_notification(
+                Notification::warning("A query is already running. Cancel it first."),
+                cx,
+            );
+            return;
+        }
+        self.editor.update(cx, |editor, cx| {
+            let current = editor.value();
+            let head = current.trim_end();
+            let text = if head.is_empty() {
+                sql.to_string()
+            } else {
+                format!("{head}\n\n{sql}")
+            };
+            let start = text.len() - sql.len();
+            editor.replace_all(text.clone(), window, cx);
+            editor.set_selected_range(start..text.len(), cx);
+            editor.focus(window, cx);
+        });
+        if run {
+            self.run(&RunQuery, window, cx);
+        }
+        cx.notify();
+    }
+
     fn sql(&self, cx: &App) -> String {
         let editor = self.editor.read(cx);
         let selected = editor.selected_value();

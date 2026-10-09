@@ -59,6 +59,7 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Use Savoy blue, not red, as the brand accent](./202610091125-use-savoy-blue-not-red-as-the-brand-accent.md) | Accepted |
 | 2026-10-09 | [Stream query results as server-rendered text pages](./202610091303-stream-query-results-as-server-rendered-text-pages.md) | Accepted |
 | 2026-10-09 | [Serialize all work on one connection per session](./202610091309-serialize-all-work-on-one-connection-per-session.md) | Accepted |
-| 2026-10-09 | [Load schema objects and table details on demand](./202610091437-load-schema-objects-and-table-details-on-demand.md) | Proposed |
 | 2026-10-09 | [Draw ER diagrams natively with a built-in layered layout](./202610091437-draw-er-diagrams-natively-with-a-built-in-layered-layout.md) | Proposed |
+| 2026-10-09 | [Load schema objects and table details on demand](./202610091437-load-schema-objects-and-table-details-on-demand.md) | Proposed |
 | 2026-10-09 | [Store connection secrets in a user-only file](./202610091454-store-connection-secrets-in-a-user-only-file.md) | Accepted |
+| 2026-10-09 | [Name the product Savoia Studio](./202610091612-name-the-product-savoia-studio.md) | Accepted |

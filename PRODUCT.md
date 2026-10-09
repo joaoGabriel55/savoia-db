@@ -12,7 +12,7 @@ Backend developers who work in PostgreSQL and MySQL every day. They write and ru
 
 ## Product Purpose
 
-Savoia DB is a desktop database client for PostgreSQL and MySQL (MariaDB later). It covers the daily loop of connecting, exploring a schema, querying, browsing and editing table data, plus dumping and importing databases. Success means a developer keeps it open all day instead of a heavier IDE or a thinner query tool, because it starts instantly, stays out of the way and never puts production data at risk.
+Savoia Studio is a desktop database client for PostgreSQL and MySQL (MariaDB later). It covers the daily loop of connecting, exploring a schema, querying, browsing and editing table data, plus dumping and importing databases. Success means a developer keeps it open all day instead of a heavier IDE or a thinner query tool, because it starts instantly, stays out of the way and never puts production data at risk.
 
 ## Positioning
 
@@ -32,11 +32,11 @@ These are budgets from `docs/PLAN.md`, not measured results yet. Don't present t
 - **v1 scope** (`docs/PLAN.md`): schema explorer with DDL, SQL editor with schema-aware completion and history, a streamed virtualized result grid, inline table edits (pending changes → SQL preview → commit), dump/import, light and dark themes, keyboard-first use and a command palette.
 - **Later:** ER diagram, table designer, schema diff, saved queries, more engines, AI assistant, query plan visualizer. New engines or features need an ADR or roadmap entry.
 - **Constraints:** the UI never blocks; colors come only from `crates/savoia-app/src/theme.rs` tokens; Lucide icons beyond the default set must be registered in `crates/savoia-app/src/assets.rs`; only `savoia-app` depends on `gpui-kit`.
-- **Undecided:** packaging/updater, distribution channel, final naming and license (see `docs/PLAN.md` §6).
+- **Undecided:** packaging/updater, distribution channel and license (see `docs/PLAN.md` §6).
 
 ## Brand Commitments
 
-- Name: **Savoia DB**.
+- Name: **Savoia Studio** (formerly Savoia DB; `docs/adr/202610091612-name-the-product-savoia-studio.md`).
 - Italian identity rooted in Savoy Piedmont: Ivrea green is the primary color, Savoy blue (azzurro Savoia) the accent, and status colors never reuse either brand hue (`docs/adr/202610091125-use-savoy-blue-not-red-as-the-brand-accent.md`). The previous amber look is archived in `docs/design/amber-baseline.md`.
 - Connection colors carry through the explorer, console tab and status bar, so a production connection is recognizable everywhere (accepted ADR).
 - Dump and import are first-class actions, not buried in menus (accepted ADR).

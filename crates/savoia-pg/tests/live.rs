@@ -221,7 +221,7 @@ async fn require_uses_tls() {
     let used_tls: bool = client
         .query_one(
             "SELECT bool_or(s.ssl) FROM pg_stat_ssl s JOIN pg_stat_activity a USING (pid) \
-             WHERE a.application_name = 'Savoia DB'",
+             WHERE a.application_name = 'Savoia Studio'",
             &[],
         )
         .await
