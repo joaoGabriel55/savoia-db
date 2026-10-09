@@ -47,7 +47,15 @@ pub fn init(cx: &mut App) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Pane {
     Output,
-    Result,
+    /// A result set of the last run, by position.
+    Result(usize),
+}
+
+/// One result set of the last run: its grid, and its own rows and time.
+struct ResultTab {
+    table: Entity<TableState<ResultSet>>,
+    summary: SharedString,
+    _scrolled: Subscription,
 }
 
 struct OutputLine {
@@ -66,11 +74,11 @@ pub struct QueryConsole {
     data_sources: Entity<DataSources>,
     explorer: Entity<Explorer>,
     editor: Entity<EditorState>,
-    results: Entity<TableState<ResultSet>>,
+    results: Vec<ResultTab>,
     output: Vec<OutputLine>,
     pane: Pane,
     running: Option<Running>,
-    /// Rows and time of the last run, for the pane header.
+    /// Results and time of the last run, for the Output pane's header.
     summary: Option<SharedString>,
 }
 
@@ -82,15 +90,12 @@ impl QueryConsole {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| EditorState::new(window, cx).language("sql"));
-        let results = cx.new(|cx| TableState::new(ResultSet::empty(), window, cx));
         cx.observe(&explorer, |_, _, cx| cx.notify()).detach();
-        // Scrolling asks for rows, which can end a pause.
-        cx.observe(&results, |_, _, cx| cx.notify()).detach();
         Self {
             data_sources,
             explorer,
             editor,
-            results,
+            results: Vec::new(),
             output: Vec::new(),
             pane: Pane::Output,
             running: None,
@@ -104,8 +109,15 @@ impl QueryConsole {
     }
 
     #[cfg(test)]
-    pub fn results(&self) -> &Entity<TableState<ResultSet>> {
-        &self.results
+    pub fn results(&self) -> Vec<Entity<TableState<ResultSet>>> {
+        self.results.iter().map(|tab| tab.table.clone()).collect()
+    }
+
+    /// The header text of each result tab, then of the Output pane.
+    #[cfg(test)]
+    pub fn summaries(&self) -> (Vec<String>, Option<String>) {
+        let tabs = self.results.iter().map(|t| t.summary.to_string()).collect();
+        (tabs, self.summary.as_ref().map(|s| s.to_string()))
     }
 
     #[cfg(test)]
@@ -157,10 +169,7 @@ impl QueryConsole {
             return;
         }
 
-        self.results.update(cx, |table, cx| {
-            *table.delegate_mut() = ResultSet::empty();
-            table.refresh(cx);
-        });
+        self.results.clear();
         self.output.clear();
         self.pane = Pane::Output;
         self.summary = None;
@@ -186,7 +195,9 @@ impl QueryConsole {
                         pacer = Some(fresh.clone());
                         loaded = Some(0);
                         skipped = 0;
-                        this.update(cx, |this, cx| this.start_result(meta, fresh, cx))
+                        this.update_in(cx, |this, window, cx| {
+                            this.start_result(meta, fresh, window, cx)
+                        })
                     }
                     Ok(QueryEvent::Rows(rows)) => {
                         let total = loaded.get_or_insert(0);
@@ -234,10 +245,23 @@ impl QueryConsole {
             return;
         };
         drop(running);
-        let rows = self.results.read(cx).delegate().len();
-        self.log(format!("Cancelled after {}", count(rows, "row")), false);
+        // Only the last result can still be streaming.
+        let streaming = self
+            .results
+            .last()
+            .map(|tab| tab.table.read(cx).delegate())
+            .filter(|rows| rows.pacer().is_some())
+            .map(|rows| rows.len());
+        let message = match streaming {
+            Some(rows) => format!("Cancelled after {}", count(rows, "row")),
+            None => "Cancelled".to_string(),
+        };
+        if let Some(rows) = streaming {
+            self.set_last_summary(format!("{} · cancelled", count(rows, "row")));
+        }
         self.stop_grid(cx);
-        self.summary = Some(format!("{} · cancelled", count(rows, "row")).into());
+        self.log(message, false);
+        self.summary = Some("cancelled".into());
         cx.notify();
     }
 
@@ -245,23 +269,34 @@ impl QueryConsole {
         &mut self,
         meta: Arc<[savoia_core::ColumnMeta]>,
         pacer: Arc<Pacer>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.results.update(cx, |table, cx| {
+        let table = cx.new(|cx| {
+            let mut table = TableState::new(ResultSet::empty(), window, cx);
             table.delegate_mut().start(meta, pacer);
             table.refresh(cx);
-            cx.notify();
+            table
         });
-        self.pane = Pane::Result;
+        // Scrolling asks for rows, which can end a pause.
+        let scrolled = cx.observe(&table, |_, _, cx| cx.notify());
+        self.results.push(ResultTab {
+            table,
+            summary: "0 rows…".into(),
+            _scrolled: scrolled,
+        });
+        self.pane = Pane::Result(self.results.len() - 1);
         cx.notify();
     }
 
     fn add_rows(&mut self, rows: Vec<savoia_core::Row>, total: usize, cx: &mut Context<Self>) {
-        self.results.update(cx, |table, cx| {
-            table.delegate_mut().extend(rows);
-            cx.notify();
-        });
-        self.summary = Some(format!("{}…", count(total, "row")).into());
+        if let Some(tab) = self.results.last() {
+            tab.table.update(cx, |table, cx| {
+                table.delegate_mut().extend(rows);
+                cx.notify();
+            });
+        }
+        self.set_last_summary(format!("{}…", count(total, "row")));
         cx.notify();
     }
 
@@ -281,10 +316,12 @@ impl QueryConsole {
             (None, Some(affected)) => format!("{} affected", count(affected as usize, "row")),
             (None, None) => "OK".to_string(),
         };
-        self.log(format!("{what} · {}", duration(elapsed)), false);
+        let line = format!("{what} · {}", duration(elapsed));
         if rows.is_some() {
+            self.set_last_summary(line.clone());
             self.stop_grid(cx);
         }
+        self.log(line, false);
         cx.notify();
     }
 
@@ -300,13 +337,11 @@ impl QueryConsole {
     fn finish(&mut self, cx: &mut Context<Self>) {
         if let Some(running) = self.running.take() {
             self.stop_grid(cx);
-            let rows = self.results.read(cx).delegate();
-            let rows = rows.has_result().then(|| count(rows.len(), "row"));
             let time = duration(running.started.elapsed());
             self.summary = Some(
-                match rows {
-                    Some(rows) => format!("{rows} · {time}"),
-                    None => time,
+                match self.results.len() {
+                    0 => time,
+                    n => format!("{} · {time}", count(n, "result")),
                 }
                 .into(),
             );
@@ -314,11 +349,20 @@ impl QueryConsole {
         cx.notify();
     }
 
+    /// Ends streaming into the last result, the only one that can stream.
     fn stop_grid(&self, cx: &mut Context<Self>) {
-        self.results.update(cx, |table, cx| {
-            table.delegate_mut().finish();
-            cx.notify();
-        });
+        if let Some(tab) = self.results.last() {
+            tab.table.update(cx, |table, cx| {
+                table.delegate_mut().finish();
+                cx.notify();
+            });
+        }
+    }
+
+    fn set_last_summary(&mut self, summary: String) {
+        if let Some(tab) = self.results.last_mut() {
+            tab.summary = summary.into();
+        }
     }
 
     fn log(&mut self, text: String, error: bool) {
@@ -404,13 +448,19 @@ impl QueryConsole {
 
     fn render_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let results = self.results.read(cx).delegate();
-        let (has_result, paused) = (results.has_result(), results.is_paused());
-        let pacer = results.pacer().cloned();
-        let pane_tab = |id: &'static str, label: &'static str, pane: Pane| {
+        // Only the last result streams, so only it can be paused.
+        let paused = self.results.last().and_then(|tab| {
+            let rows = tab.table.read(cx).delegate();
+            rows.is_paused()
+                .then(|| rows.pacer().cloned())
+                .flatten()
+                .map(|pacer| (self.results.len(), pacer))
+        });
+        let pane_tab = |id: ElementId, label: SharedString, pane: Pane| {
             let selected = self.pane == pane;
             div()
                 .id(id)
+                .flex_none()
                 .cursor_pointer()
                 .border_b_2()
                 .border_color(if selected {
@@ -425,12 +475,16 @@ impl QueryConsole {
                     cx.notify();
                 }))
         };
+        let summary = match self.pane {
+            Pane::Result(ix) => self.results.get(ix).map(|tab| tab.summary.clone()),
+            Pane::Output => self.summary.clone(),
+        };
 
         let body = match self.pane {
-            Pane::Result if has_result => div()
+            Pane::Result(ix) if ix < self.results.len() => div()
                 .flex_1()
                 .min_h_0()
-                .child(DataTable::new(&self.results).bordered(false))
+                .child(DataTable::new(&self.results[ix].table).bordered(false))
                 .into_any_element(),
             _ if self.output.is_empty() => div()
                 .flex_1()
@@ -470,17 +524,34 @@ impl QueryConsole {
                     .text_xs()
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(pane_tab("pane-output", "Output", Pane::Output))
-                    .when(has_result, |this| {
-                        this.child(pane_tab("pane-result", "Result 1", Pane::Result))
-                    })
-                    .child(div().flex_1())
-                    .when_some(pacer.filter(|_| paused), |this, pacer| {
+                    .child(
+                        h_flex()
+                            .id("pane-tabs")
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .gap_3()
+                            .overflow_x_scroll()
+                            .child(pane_tab(
+                                "pane-output".into(),
+                                "Output".into(),
+                                Pane::Output,
+                            ))
+                            .children((0..self.results.len()).map(|ix| {
+                                pane_tab(
+                                    ("pane-result", ix).into(),
+                                    format!("Result {}", ix + 1).into(),
+                                    Pane::Result(ix),
+                                )
+                            })),
+                    )
+                    .when_some(paused, |this, (number, pacer)| {
                         let skip = pacer.clone();
                         this.child(
                             div()
+                                .flex_none()
                                 .text_color(theme.muted_foreground)
-                                .child("Paused · statements after this one wait"),
+                                .child(format!("Result {number} paused · later statements wait")),
                         )
                         .child(
                             Button::new("load-all")
@@ -505,11 +576,12 @@ impl QueryConsole {
                                 })),
                         )
                     })
-                    .children(
-                        self.summary
-                            .clone()
-                            .map(|s| div().text_color(theme.muted_foreground).child(s)),
-                    ),
+                    .children(summary.map(|s| {
+                        div()
+                            .flex_none()
+                            .text_color(theme.muted_foreground)
+                            .child(s)
+                    })),
             )
             .child(body)
     }

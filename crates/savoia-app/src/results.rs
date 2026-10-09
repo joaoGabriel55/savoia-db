@@ -134,11 +134,6 @@ impl ResultSet {
             .is_some_and(|p| p.is_full(self.rows.len()))
     }
 
-    /// Whether a statement has produced a result set (beyond the row-number column).
-    pub fn has_result(&self) -> bool {
-        self.columns.len() > 1
-    }
-
     fn cell(&self, row_ix: usize, col_ix: usize) -> Option<&str> {
         self.rows[row_ix][col_ix - 1].as_deref()
     }

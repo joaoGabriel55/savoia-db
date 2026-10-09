@@ -166,9 +166,18 @@ fn run(
     click(cx, window, "run");
 }
 
-fn grid(cx: &mut TestAppContext, console: &Entity<QueryConsole>) -> (usize, Vec<String>) {
+/// Row count and first row of result `ix` (negative: from the end).
+fn grid_at(
+    cx: &mut TestAppContext,
+    console: &Entity<QueryConsole>,
+    ix: isize,
+) -> (usize, Vec<String>) {
     console.read_with(cx, |c, cx| {
-        let table = c.results().read(cx);
+        let results = c.results();
+        let Some(table) = results.get(ix.rem_euclid(results.len().max(1) as isize) as usize) else {
+            return (0, Vec::new());
+        };
+        let table = table.read(cx);
         let rows = table.delegate();
         let first = (0..rows.columns_count(cx))
             .filter(|_| rows.rows_count(cx) > 0)
@@ -176,6 +185,11 @@ fn grid(cx: &mut TestAppContext, console: &Entity<QueryConsole>) -> (usize, Vec<
             .collect();
         (rows.len(), first)
     })
+}
+
+/// The last result.
+fn grid(cx: &mut TestAppContext, console: &Entity<QueryConsole>) -> (usize, Vec<String>) {
+    grid_at(cx, console, -1)
 }
 
 fn idle(cx: &mut TestAppContext, console: &Entity<QueryConsole>) {
@@ -248,7 +262,11 @@ async fn postgres_console_finishes_a_result_that_fills_the_grid(cx: &mut TestApp
 }
 
 fn paused(cx: &mut TestAppContext, console: &Entity<QueryConsole>) -> bool {
-    console.read_with(cx, |c, cx| c.results().read(cx).delegate().is_paused())
+    console.read_with(cx, |c, cx| {
+        c.results()
+            .last()
+            .is_some_and(|t| t.read(cx).delegate().is_paused())
+    })
 }
 
 /// Skip rest discards the paused result's remaining rows so the script goes on.
@@ -268,7 +286,20 @@ async fn postgres_console_skips_the_rest_of_a_paused_result(cx: &mut TestAppCont
     click(cx, window, "skip-rest");
     idle(cx, &console);
 
-    assert_eq!(grid(cx, &console).1[1], "after");
+    // Each result keeps its own tab: the kept rows, then the next statement.
+    assert_eq!(console.read_with(cx, |c, _| c.results().len()), 2);
+    assert_eq!(grid_at(cx, &console, 0).0, 1000);
+    assert_eq!(grid_at(cx, &console, 1).1[1], "after");
+    let (tabs, run) = console.read_with(cx, |c, _| c.summaries());
+    assert!(
+        tabs[0].starts_with("1,000 rows (99,000 rows skipped) · "),
+        "{tabs:?}"
+    );
+    assert!(tabs[1].starts_with("1 row · "), "{tabs:?}");
+    assert!(
+        run.as_deref().unwrap_or("").starts_with("2 results · "),
+        "{run:?}"
+    );
     let lines = output(cx, &console);
     assert!(
         lines[0].starts_with("1,000 rows (99,000 rows skipped) · "),
