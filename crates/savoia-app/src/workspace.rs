@@ -18,6 +18,7 @@ use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, DataSourcesEvent, SourceState};
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
+use crate::memory::MemoryMeter;
 use crate::theme;
 
 pub struct Workspace {
@@ -28,6 +29,7 @@ pub struct Workspace {
     diagrams: Vec<Entity<ErDiagram>>,
     /// 0 is the console, then `diagrams`.
     active_tab: usize,
+    memory: Entity<MemoryMeter>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -49,6 +51,7 @@ impl Workspace {
             console,
             diagrams: Vec::new(),
             active_tab: 0,
+            memory: cx.new(MemoryMeter::new),
             data_sources,
             explorer,
             _subscriptions: subscriptions,
@@ -267,7 +270,12 @@ impl Render for Workspace {
                     .child(Icon::new(status_icon).xsmall())
                     .child(status_text),
             )
-            .right(div().text_xs().text_color(muted).child("SQL · UTF-8"));
+            .right(
+                h_flex()
+                    .gap_3()
+                    .child(self.memory.clone())
+                    .child(div().text_xs().text_color(muted).child("SQL · UTF-8")),
+            );
 
         v_flex()
             .size_full()

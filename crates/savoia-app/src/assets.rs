@@ -24,6 +24,7 @@ icon_assets!(
         Layers,
         Link2,
         ListOrdered,
+        MemoryStick,
         Plug,
         RotateCcw,
         Scan,

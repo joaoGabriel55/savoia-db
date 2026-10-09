@@ -580,3 +580,79 @@ async fn postgres_explorer_loads_on_expand_and_draws_the_diagram(cx: &mut TestAp
     cx.update_window(window, |_, window, cx| window.render_frame(cx))
         .unwrap();
 }
+
+/// Memory benchmark over the Serie A sample (`samples/serie_a.postgres.sql`
+/// loaded). Prints resident memory after each step:
+/// `SAVOIA_PG_URL=… cargo test -p savoia-app --release memory_benchmark -- --ignored --nocapture`
+/// The test platform draws nothing, so GPU-side memory of the real app isn't included.
+#[gpui_kit::test]
+#[ignore = "benchmark; run by hand"]
+async fn memory_benchmark(cx: &mut TestAppContext) {
+    use crate::memory::{format_bytes, resident_bytes};
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let mut rows: Vec<(&str, u64, Duration)> = Vec::new();
+    let mut step = |name, started: std::time::Instant| {
+        rows.push((name, resident_bytes().unwrap_or(0), started.elapsed()));
+    };
+
+    let t = std::time::Instant::now();
+    step("start", t);
+    let (ds, console, window) = console_on(cx, &url);
+    step("connected, explorer open", t);
+
+    let t = std::time::Instant::now();
+    run(cx, window, &console, "SELECT * FROM serie_a.match_events");
+    wait_until(cx, "the pause", |cx| paused(cx, &console));
+    click(cx, window, "load-all");
+    idle(cx, &console);
+    assert_eq!(
+        grid(cx, &console).0,
+        150_000,
+        "load samples/serie_a.postgres.sql first"
+    );
+    step("150,000 rows x 6 columns in the grid", t);
+
+    let t = std::time::Instant::now();
+    run(cx, window, &console, "SELECT 1");
+    idle(cx, &console);
+    step("result replaced by SELECT 1", t);
+
+    let t = std::time::Instant::now();
+    let node = NodeRef {
+        connection: ds.read_with(cx, |ds, _| ds.connections()[0].id),
+        database: "savoia".into(),
+        schema: "serie_a".into(),
+        table: None,
+    };
+    let (erd_window, diagram) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|cx| ErDiagram::new(ds.clone(), node, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the diagram", |cx| {
+        diagram.read_with(cx, |d, _| d.loaded().is_some())
+    });
+    for _ in 0..3 {
+        cx.update_window(erd_window, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+    }
+    step("serie_a ER diagram (14 tables) drawn", t);
+
+    println!("\n| Step | Resident memory | Δ | Took |\n| --- | --- | --- | --- |");
+    let mut last = rows[0].1;
+    for (name, bytes, took) in &rows {
+        let delta = *bytes as i64 - last as i64;
+        println!(
+            "| {name} | {} | {}{} | {} ms |",
+            format_bytes(*bytes),
+            if delta < 0 { "-" } else { "+" },
+            format_bytes(delta.unsigned_abs()),
+            took.as_millis()
+        );
+        last = *bytes;
+    }
+}
