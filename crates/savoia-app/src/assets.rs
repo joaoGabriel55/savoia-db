@@ -18,14 +18,18 @@ icon_assets!(
         FileCode,
         Funnel,
         Key,
+        KeyRound,
         Layers,
+        Link2,
         ListOrdered,
         Plug,
+        RotateCcw,
         Server,
         Table,
         Timer,
         Unplug,
         Upload,
+        Workflow,
     ]
 );
 

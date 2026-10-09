@@ -1,11 +1,12 @@
 //! Opening a connection end to end: SSH tunnel (if any), driver, catalog.
 //! UI-free; runs on the I/O runtime.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use savoia_core::{
     AppError, AppResult, Catalog, Connection, ConnectionConfig, Driver, Engine, QueryEvent,
-    QueryHandle, Secrets, ServerInfo,
+    QueryHandle, Secrets, ServerInfo, TableInfo,
 };
 use savoia_mysql::MysqlDriver;
 use savoia_pg::PgDriver;
@@ -14,9 +15,15 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::runtime;
 
+/// A table by database, schema and name.
+pub type TableKey = (String, String, String);
+
 pub struct Session {
-    /// The last catalog loaded; replaced by [`Session::reload_catalog`].
+    /// The last catalog loaded, with the object names loaded so far. See
+    /// `docs/adr/202610091437-load-schema-objects-and-table-details-on-demand.md`.
     catalog: RwLock<Arc<Catalog>>,
+    /// Table details loaded so far; cleared by [`Session::reload_catalog`].
+    tables: RwLock<HashMap<TableKey, Arc<TableInfo>>>,
     // Dropping it closes the session.
     conn: Arc<dyn Connection>,
     /// One operation at a time on `conn`. See
@@ -64,6 +71,7 @@ pub async fn open(
     let catalog = conn.catalog().await?;
     Ok(Session {
         catalog: RwLock::new(Arc::new(catalog)),
+        tables: RwLock::default(),
         conn: Arc::from(conn),
         gate: Arc::default(),
         _tunnel: tunnel,
@@ -72,10 +80,7 @@ pub async fn open(
 
 impl Session {
     pub fn catalog(&self) -> Arc<Catalog> {
-        self.catalog
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        read(&self.catalog).clone()
     }
 
     /// Whether a query (or another operation) holds the gate right now.
@@ -83,15 +88,88 @@ impl Session {
         self.gate.try_lock().is_err()
     }
 
-    /// Waits for the gate, then reloads the catalog on this connection.
-    /// Runs on the I/O runtime.
+    /// The details of a table, if loaded.
+    pub fn table(&self, database: &str, schema: &str, table: &str) -> Option<Arc<TableInfo>> {
+        let key = (database.to_owned(), schema.to_owned(), table.to_owned());
+        read(&self.tables).get(&key).cloned()
+    }
+
+    /// Waits for the gate, then reloads the catalog on this connection, and
+    /// the object names of the schemas that were loaded before. Runs on the
+    /// I/O runtime.
     pub async fn reload_catalog(&self) -> AppResult<()> {
+        let loaded: Vec<(String, String)> = self
+            .catalog()
+            .databases
+            .iter()
+            .flat_map(|d| {
+                d.schemas
+                    .iter()
+                    .filter(|s| s.objects.is_some())
+                    .map(|s| (d.name.clone(), s.name.clone()))
+            })
+            .collect();
         let catalog = {
             let _guard = self.gate.lock().await;
-            self.conn.catalog().await?
+            let mut catalog = self.conn.catalog().await?;
+            for (database, schema) in loaded {
+                if let Some(node) = catalog.schema_mut(&database, &schema) {
+                    node.objects = Some(self.conn.list_objects(&database, &schema).await?);
+                }
+            }
+            catalog
         };
-        *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(catalog);
+        *write(&self.catalog) = Arc::new(catalog);
+        write(&self.tables).clear();
         Ok(())
+    }
+
+    /// Waits for the gate, then loads the object names of one schema into
+    /// the catalog. Runs on the I/O runtime.
+    pub async fn load_objects(&self, database: &str, schema: &str) -> AppResult<()> {
+        let objects = {
+            let _guard = self.gate.lock().await;
+            self.conn.list_objects(database, schema).await?
+        };
+        let mut catalog = write(&self.catalog);
+        let mut updated = Catalog::clone(&catalog);
+        if let Some(node) = updated.schema_mut(database, schema) {
+            node.objects = Some(objects);
+        }
+        *catalog = Arc::new(updated);
+        Ok(())
+    }
+
+    /// Waits for the gate, then loads one table's details. Runs on the I/O
+    /// runtime.
+    pub async fn describe_table(
+        &self,
+        database: &str,
+        schema: &str,
+        table: &str,
+    ) -> AppResult<Arc<TableInfo>> {
+        let info = {
+            let _guard = self.gate.lock().await;
+            Arc::new(self.conn.describe_table(database, schema, table).await?)
+        };
+        let key = (database.to_owned(), schema.to_owned(), table.to_owned());
+        write(&self.tables).insert(key, info.clone());
+        Ok(info)
+    }
+
+    /// Waits for the gate, then loads every table of a schema, keeping them
+    /// as loaded table details too. Runs on the I/O runtime.
+    pub async fn describe_schema(&self, database: &str, schema: &str) -> AppResult<Vec<TableInfo>> {
+        let tables = {
+            let _guard = self.gate.lock().await;
+            self.conn.describe_schema(database, schema).await?
+        };
+        let mut cache = write(&self.tables);
+        for table in &tables {
+            let key = (database.to_owned(), schema.to_owned(), table.name.clone());
+            cache.insert(key, Arc::new(table.clone()));
+        }
+        Ok(tables)
     }
 
     /// Waits for the gate, then starts `sql`. The gate stays taken until the
@@ -137,6 +215,14 @@ impl Drop for RunningQuery {
     }
 }
 
+fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    lock.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn write<T>(lock: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    lock.write().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Connects, reads the server version and disconnects.
 pub async fn test(
     config: ConnectionConfig,
@@ -165,7 +251,8 @@ mod tests {
 
     use async_trait::async_trait;
     use savoia_core::{
-        AppResult, Cancel, CancelHandle, Catalog, Connection, QueryHandle, QuerySender, ServerInfo,
+        AppResult, Cancel, CancelHandle, Catalog, Connection, QueryHandle, QuerySender,
+        SchemaObjects, ServerInfo, TableInfo,
     };
     use tokio::sync::Mutex;
 
@@ -198,6 +285,18 @@ mod tests {
             Ok(catalog("reloaded"))
         }
 
+        async fn list_objects(&self, _: &str, _: &str) -> AppResult<SchemaObjects> {
+            unimplemented!()
+        }
+
+        async fn describe_table(&self, _: &str, _: &str, _: &str) -> AppResult<TableInfo> {
+            unimplemented!()
+        }
+
+        async fn describe_schema(&self, _: &str, _: &str) -> AppResult<Vec<TableInfo>> {
+            unimplemented!()
+        }
+
         async fn execute(&self, _: String) -> AppResult<QueryHandle> {
             let (tx, handle) = QueryHandle::channel(CancelHandle::new(NoCancel));
             *self.sender.lock().unwrap() = Some(tx);
@@ -221,6 +320,7 @@ mod tests {
         let fake = Arc::new(Fake::default());
         let session = Arc::new(Session {
             catalog: RwLock::new(Arc::new(catalog("first"))),
+            tables: RwLock::default(),
             conn: fake.clone(),
             gate: Arc::new(Mutex::new(())),
             _tunnel: None,

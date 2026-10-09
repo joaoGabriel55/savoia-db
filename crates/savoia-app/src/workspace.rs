@@ -1,7 +1,8 @@
-//! Main window: title bar, explorer | console tabs, status bar. Also turns
+//! Main window: title bar, explorer | console and diagram tabs, status bar. Also turns
 //! data-source events into notifications and the host-key trust prompt.
 
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 use gpui_kit::component::status_bar::StatusBar;
@@ -15,13 +16,18 @@ use savoia_tunnel::HostKeyPolicy;
 
 use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, DataSourcesEvent, SourceState};
-use crate::explorer::Explorer;
+use crate::diagram::ErDiagram;
+use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
 use crate::theme;
 
 pub struct Workspace {
     data_sources: Entity<DataSources>,
     explorer: Entity<Explorer>,
     console: Entity<QueryConsole>,
+    /// Tabs after the console's.
+    diagrams: Vec<Entity<ErDiagram>>,
+    /// 0 is the console, then `diagrams`.
+    active_tab: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -33,15 +39,50 @@ impl Workspace {
             cx.observe(&explorer, |_, _, cx| cx.notify()),
             cx.observe(&data_sources, |_, _, cx| cx.notify()),
             cx.subscribe_in(&data_sources, window, Self::on_data_source_event),
+            cx.subscribe(&explorer, |this, _, event, cx| match event {
+                ExplorerEvent::ShowDiagram(node) => this.show_diagram(node.clone(), cx),
+            }),
         ];
         let console =
             cx.new(|cx| QueryConsole::new(data_sources.clone(), explorer.clone(), window, cx));
         Self {
             console,
+            diagrams: Vec::new(),
+            active_tab: 0,
             data_sources,
             explorer,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Opens the diagram of `node`'s schema, or brings its tab forward.
+    fn show_diagram(&mut self, node: NodeRef, cx: &mut Context<Self>) {
+        let open = self.diagrams.iter().position(|d| d.read(cx).shows(&node));
+        let index = match open {
+            Some(i) => {
+                self.diagrams[i].update(cx, |d, cx| d.focus(node.table, cx));
+                i
+            }
+            None => {
+                let data_sources = self.data_sources.clone();
+                self.diagrams
+                    .push(cx.new(|cx| ErDiagram::new(data_sources, node, cx)));
+                self.diagrams.len() - 1
+            }
+        };
+        self.active_tab = index + 1;
+        cx.notify();
+    }
+
+    fn close_diagram(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.diagrams.len() {
+            return;
+        }
+        self.diagrams.remove(index);
+        if self.active_tab > index {
+            self.active_tab -= 1;
+        }
+        cx.notify();
     }
 
     fn on_data_source_event(
@@ -165,15 +206,57 @@ impl Render for Workspace {
                     .text_color(source_color),
             );
 
+        let diagram_tabs: Vec<Tab> = self
+            .diagrams
+            .iter()
+            .enumerate()
+            .map(|(i, diagram)| {
+                Tab::new()
+                    .label(diagram.read(cx).title())
+                    .prefix(Icon::new(Lucide::Workflow).small().ml_2().text_color(muted))
+                    .suffix(
+                        Button::new(("close-diagram", i))
+                            .ghost()
+                            .xsmall()
+                            .mr_1()
+                            .icon(Icon::new(IconName::Close))
+                            .tooltip("Close")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.close_diagram(i, cx);
+                            })),
+                    )
+            })
+            .collect();
+        let workspace = cx.entity().downgrade();
+        let content = match self
+            .active_tab
+            .checked_sub(1)
+            .and_then(|i| self.diagrams.get(i))
+        {
+            Some(diagram) => diagram.clone().into_any_element(),
+            None => self.console.clone().into_any_element(),
+        };
+
         let main = v_flex()
             .size_full()
             .child(
                 TabBar::new("consoles")
                     .underline()
                     .child(console_tab)
-                    .selected_index(0),
+                    .children(diagram_tabs)
+                    .selected_index(self.active_tab.min(self.diagrams.len()))
+                    .on_click(move |ix, _, cx| {
+                        let ix = *ix;
+                        workspace
+                            .update(cx, |this, cx| {
+                                this.active_tab = ix;
+                                cx.notify();
+                            })
+                            .ok();
+                    }),
             )
-            .child(div().flex_1().min_h_0().child(self.console.clone()));
+            .child(div().flex_1().min_h_0().child(content));
 
         let status = StatusBar::new()
             .left(

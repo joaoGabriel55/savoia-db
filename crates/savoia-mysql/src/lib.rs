@@ -1,5 +1,6 @@
 //! MySQL / MariaDB driver built on `mysql_async`. Must run inside a Tokio runtime.
 
+mod catalog;
 mod execute;
 
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, DriverError, Error as MyError, Opts, OptsBuilder, SslOpts};
 use savoia_core::{
     AppError, AppResult, Catalog, Connection, DatabaseNode, Driver, Endpoint, Engine, QueryHandle,
-    SchemaNode, SchemaObjects, Secrets, ServerInfo, SslMode,
+    SchemaNode, SchemaObjects, Secrets, ServerInfo, SslMode, TableInfo,
 };
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
@@ -182,25 +183,43 @@ impl Connection for MysqlConnection {
             .map_err(query_error)?
             .flatten();
         let names: Vec<String> = conn.query("SHOW DATABASES").await.map_err(query_error)?;
+        let mut schemas = catalog::schemas(conn).await?;
 
-        let mut databases = Vec::with_capacity(names.len());
-        for name in names {
-            let is_current = current.as_deref() == Some(name.as_str());
-            let schemas = if is_current {
-                vec![SchemaNode {
-                    objects: objects(conn, &name).await?,
+        let databases = names
+            .into_iter()
+            .map(|name| {
+                let schema = schemas.remove(&name).unwrap_or_else(|| SchemaNode {
                     name: name.clone(),
-                }]
-            } else {
-                Vec::new()
-            };
-            databases.push(DatabaseNode {
-                name,
-                is_current,
-                schemas,
-            });
-        }
+                    counts: Default::default(),
+                    objects: None,
+                });
+                DatabaseNode {
+                    is_current: current.as_deref() == Some(name.as_str()),
+                    name,
+                    schemas: vec![schema],
+                }
+            })
+            .collect();
         Ok(Catalog { server, databases })
+    }
+
+    async fn list_objects(&self, database: &str, _schema: &str) -> AppResult<SchemaObjects> {
+        catalog::objects(live(&mut *self.lock().await?), database).await
+    }
+
+    async fn describe_table(
+        &self,
+        database: &str,
+        _schema: &str,
+        table: &str,
+    ) -> AppResult<TableInfo> {
+        let mut guard = self.lock().await?;
+        let mut tables = catalog::describe(live(&mut guard), database, Some(table)).await?;
+        Ok(tables.remove(0))
+    }
+
+    async fn describe_schema(&self, database: &str, _schema: &str) -> AppResult<Vec<TableInfo>> {
+        catalog::describe(live(&mut *self.lock().await?), database, None).await
     }
 
     async fn execute(&self, sql: String) -> AppResult<QueryHandle> {
@@ -213,36 +232,4 @@ impl Connection for MysqlConnection {
             drop(conn.disconnect().await);
         }
     }
-}
-
-async fn objects(conn: &mut Conn, database: &str) -> AppResult<SchemaObjects> {
-    let relations: Vec<(String, String)> = conn
-        .exec(
-            "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES \
-             WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
-            (database,),
-        )
-        .await
-        .map_err(query_error)?;
-    let functions: Vec<String> = conn
-        .exec(
-            "SELECT ROUTINE_NAME FROM information_schema.ROUTINES \
-             WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_NAME",
-            (database,),
-        )
-        .await
-        .map_err(query_error)?;
-
-    let mut objects = SchemaObjects {
-        functions,
-        ..SchemaObjects::default()
-    };
-    for (name, kind) in relations {
-        if kind == "VIEW" {
-            objects.views.push(name);
-        } else {
-            objects.tables.push(name);
-        }
-    }
-    Ok(objects)
 }

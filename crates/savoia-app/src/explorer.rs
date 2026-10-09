@@ -10,17 +10,20 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
-use gpui_kit::component::tree::{TreeEntry, TreeItem, TreeState, tree};
+use gpui_kit::component::tree::{TreeEntry, TreeEvent, TreeItem, TreeState, tree};
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use savoia_core::{ConnectionConfig, ConnectionId, DatabaseNode, SchemaObjects};
+use savoia_core::{ConnectionConfig, ConnectionId, DatabaseNode, ObjectCounts, SchemaNode};
 use savoia_tunnel::HostKeyPolicy;
 
 use crate::connection_form::ConnectionForm;
-use crate::data_sources::{DataSources, DataSourcesEvent, RefreshState, SourceState};
+use crate::data_sources::{
+    DataSources, DataSourcesEvent, LoadState, LoadTarget, RefreshState, SourceState,
+};
+use crate::session::Session;
 use crate::theme::{self, BandDisabled as _};
 
 /// Per-source decoration for the tree rows.
@@ -46,6 +49,12 @@ pub struct Explorer {
     /// tree, so this is how expansion survives a rebuild.
     items: Vec<TreeItem>,
     meta: Rc<HashMap<ConnectionId, SourceMeta>>,
+    /// What schema-level rows refer to, by row id.
+    nodes: Rc<HashMap<SharedString, NodeRef>>,
+    /// Muted text after a row's label, by row id.
+    suffixes: Rc<HashMap<SharedString, SharedString>>,
+    /// Rows whose children load when they are expanded.
+    unloaded: HashMap<SharedString, NodeRef>,
     /// Sessions whose current database was already expanded automatically.
     auto_opened: HashSet<ConnectionId>,
     _subscriptions: Vec<Subscription>,
@@ -71,43 +80,251 @@ fn collect_expanded(items: &[TreeItem], out: &mut HashSet<SharedString>) {
     }
 }
 
-fn groups(prefix: &str, objects: &SchemaObjects) -> Vec<TreeItem> {
-    let group = |label: &str, kind: &str, names: &[String]| {
-        TreeItem::new(format!("group:{prefix}/{label}"), label.to_owned()).children(
-            names
-                .iter()
-                .map(|name| TreeItem::new(format!("{kind}:{prefix}/{name}"), name.clone())),
-        )
-    };
-    let mut out = vec![
-        group("tables", "table", &objects.tables),
-        group("views", "view", &objects.views),
-    ];
-    if !objects.functions.is_empty() {
-        out.push(group("functions", "function", &objects.functions));
-    }
-    if !objects.sequences.is_empty() {
-        out.push(group("sequences", "sequence", &objects.sequences));
-    }
-    out
+/// The schema (and table) a tree row belongs to: what it loads on expand and
+/// what "Show diagram" opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeRef {
+    pub connection: ConnectionId,
+    pub database: String,
+    pub schema: String,
+    pub table: Option<String>,
 }
 
-fn database_item(config: &ConnectionConfig, db: &DatabaseNode) -> TreeItem {
-    let prefix = format!("{}/{}", config.id, db.name);
-    let item = TreeItem::new(format!("database:{prefix}"), db.name.clone());
-    if config.engine.has_schemas() {
-        item.children(db.schemas.iter().map(|schema| {
-            let prefix = format!("{prefix}/{}", schema.name);
-            TreeItem::new(format!("schema:{prefix}"), schema.name.clone())
-                .children(groups(&prefix, &schema.objects))
-        }))
-    } else {
-        item.children(
-            db.schemas
-                .iter()
-                .flat_map(|schema| groups(&prefix, &schema.objects)),
-        )
+impl NodeRef {
+    fn with_table(&self, table: &str) -> Self {
+        Self {
+            table: Some(table.to_owned()),
+            ..self.clone()
+        }
     }
+
+    /// What expanding this row loads, unless it is loaded already.
+    fn target(&self) -> LoadTarget {
+        let (database, schema) = (self.database.clone(), self.schema.clone());
+        match &self.table {
+            Some(table) => LoadTarget::Table {
+                database,
+                schema,
+                table: table.clone(),
+            },
+            None => LoadTarget::Objects { database, schema },
+        }
+    }
+}
+
+pub enum ExplorerEvent {
+    ShowDiagram(NodeRef),
+}
+
+/// Builds the tree rows of one connected source, noting what each row
+/// refers to and which rows still need a load.
+struct Builder<'a> {
+    ds: &'a DataSources,
+    session: &'a Session,
+    nodes: &'a mut HashMap<SharedString, NodeRef>,
+    /// Muted text after a row's label: counts, column types.
+    suffixes: &'a mut HashMap<SharedString, SharedString>,
+    /// Rows whose children aren't loaded, with what loads them.
+    unloaded: &'a mut HashMap<SharedString, NodeRef>,
+}
+
+impl Builder<'_> {
+    fn item(&mut self, id: String, label: impl Into<SharedString>, node: &NodeRef) -> TreeItem {
+        let item = TreeItem::new(id, label);
+        self.nodes.insert(item.id.clone(), node.clone());
+        item
+    }
+
+    /// The one child of a row whose children are still loading.
+    fn pending(&mut self, parent: &TreeItem, node: &NodeRef) -> TreeItem {
+        self.unloaded.insert(parent.id.clone(), node.clone());
+        let text = match self.ds.load_state(node.connection, &node.target()) {
+            Some(LoadState::Waiting) => "waiting for the running query…".to_string(),
+            Some(LoadState::Failed(err)) => format!("failed: {err}"),
+            Some(LoadState::Loading) | None => "loading…".to_string(),
+        };
+        TreeItem::new(format!("info:{}", parent.id), text)
+    }
+
+    /// The object groups of a schema, or a pending row until they load.
+    fn schema_children(
+        &mut self,
+        parent: &TreeItem,
+        prefix: &str,
+        schema: &SchemaNode,
+        node: &NodeRef,
+    ) -> Vec<TreeItem> {
+        self.suffixes
+            .insert(parent.id.clone(), count_summary(&schema.counts).into());
+        let Some(objects) = &schema.objects else {
+            return vec![self.pending(parent, node)];
+        };
+        let mut out = vec![
+            self.group(prefix, "tables", "table", &objects.tables, node),
+            self.group(prefix, "views", "view", &objects.views, node),
+        ];
+        if !objects.functions.is_empty() {
+            out.push(self.group(prefix, "functions", "function", &objects.functions, node));
+        }
+        if !objects.sequences.is_empty() {
+            out.push(self.group(prefix, "sequences", "sequence", &objects.sequences, node));
+        }
+        out
+    }
+
+    fn group(
+        &mut self,
+        prefix: &str,
+        label: &str,
+        kind: &str,
+        names: &[String],
+        node: &NodeRef,
+    ) -> TreeItem {
+        let children: Vec<TreeItem> = names
+            .iter()
+            .map(|name| {
+                let id = format!("{kind}:{prefix}/{name}");
+                if matches!(kind, "table" | "view") {
+                    let node = node.with_table(name);
+                    let item = self.item(id, name.clone(), &node);
+                    let children = self.table_children(&item, &node);
+                    item.children(children)
+                } else {
+                    TreeItem::new(id, name.clone())
+                }
+            })
+            .collect();
+        let group = self.item(format!("group:{prefix}/{label}"), label.to_owned(), node);
+        self.suffixes
+            .insert(group.id.clone(), names.len().to_string().into());
+        group.children(children)
+    }
+
+    /// Columns, then foreign keys and indexes, or a pending row until they load.
+    fn table_children(&mut self, parent: &TreeItem, node: &NodeRef) -> Vec<TreeItem> {
+        let table = node.table.as_deref().unwrap_or_default();
+        let Some(info) = self.session.table(&node.database, &node.schema, table) else {
+            return vec![self.pending(parent, node)];
+        };
+        let prefix = &parent.id[parent.id.find(':').map_or(0, |i| i + 1)..];
+        let mut out: Vec<TreeItem> = info
+            .columns
+            .iter()
+            .map(|c| {
+                let kind = if info.is_key_column(&c.name) {
+                    "pkcolumn"
+                } else if info.is_foreign_column(&c.name) {
+                    "fkcolumn"
+                } else {
+                    "column"
+                };
+                let item = TreeItem::new(format!("{kind}:{prefix}/{}", c.name), c.name.clone());
+                let mut suffix = c.data_type.clone();
+                if !c.nullable {
+                    suffix.push_str(" not null");
+                }
+                self.suffixes.insert(item.id.clone(), suffix.into());
+                item
+            })
+            .collect();
+        let mut sub_group = |label: &str, rows: Vec<(String, String)>, kind: &str| {
+            let group = TreeItem::new(format!("group:{prefix}/{label}"), label.to_owned());
+            self.suffixes
+                .insert(group.id.clone(), rows.len().to_string().into());
+            group.children(rows.into_iter().map(|(name, suffix)| {
+                let item = TreeItem::new(format!("{kind}:{prefix}/{name}"), name);
+                self.suffixes.insert(item.id.clone(), suffix.into());
+                item
+            }))
+        };
+        if !info.foreign_keys.is_empty() {
+            let rows = info
+                .foreign_keys
+                .iter()
+                .map(|fk| {
+                    let target = format!(
+                        "({}) → {}({})",
+                        fk.columns.join(", "),
+                        fk.ref_table,
+                        fk.ref_columns.join(", ")
+                    );
+                    (fk.name.clone(), target)
+                })
+                .collect();
+            out.push(sub_group("foreign keys", rows, "fk"));
+        }
+        if !info.indexes.is_empty() {
+            let rows = info
+                .indexes
+                .iter()
+                .map(|i| {
+                    let mut text = format!("({})", i.columns.join(", "));
+                    if i.primary {
+                        text.push_str(" primary");
+                    } else if i.unique {
+                        text.push_str(" unique");
+                    }
+                    (i.name.clone(), text)
+                })
+                .collect();
+            out.push(sub_group("indexes", rows, "index"));
+        }
+        out
+    }
+
+    fn database(&mut self, config: &ConnectionConfig, db: &DatabaseNode) -> TreeItem {
+        let prefix = format!("{}/{}", config.id, db.name);
+        let id = format!("database:{prefix}");
+        if config.engine.has_schemas() {
+            let item = TreeItem::new(id, db.name.clone());
+            let children: Vec<TreeItem> = db
+                .schemas
+                .iter()
+                .map(|schema| {
+                    let prefix = format!("{prefix}/{}", schema.name);
+                    let node = NodeRef {
+                        connection: config.id,
+                        database: db.name.clone(),
+                        schema: schema.name.clone(),
+                        table: None,
+                    };
+                    let item = self.item(format!("schema:{prefix}"), schema.name.clone(), &node);
+                    let children = self.schema_children(&item, &prefix, schema, &node);
+                    item.children(children)
+                })
+                .collect();
+            item.children(children)
+        } else {
+            // MySQL: the database is its own one schema.
+            let Some(schema) = db.schemas.first() else {
+                return TreeItem::new(id, db.name.clone());
+            };
+            let node = NodeRef {
+                connection: config.id,
+                database: db.name.clone(),
+                schema: schema.name.clone(),
+                table: None,
+            };
+            let item = self.item(id, db.name.clone(), &node);
+            let children = self.schema_children(&item, &prefix, schema, &node);
+            item.children(children)
+        }
+    }
+}
+
+/// e.g. "12 tables · 3 views"; empty kinds are left out.
+fn count_summary(counts: &ObjectCounts) -> String {
+    let parts: Vec<String> = [
+        (counts.tables, "table", "tables"),
+        (counts.views, "view", "views"),
+        (counts.functions, "function", "functions"),
+        (counts.sequences, "sequence", "sequences"),
+    ]
+    .into_iter()
+    .filter(|(n, _, _)| *n > 0)
+    .map(|(n, one, many)| format!("{n} {}", if n == 1 { one } else { many }))
+    .collect();
+    parts.join(" · ")
 }
 
 /// `public` if present, else the only schema.
@@ -128,6 +345,8 @@ fn default_schema(database: &TreeItem) -> Option<SharedString> {
         .map(|s| s.id.clone())
 }
 
+impl EventEmitter<ExplorerEvent> for Explorer {}
+
 impl Explorer {
     pub fn new(data_sources: Entity<DataSources>, cx: &mut Context<Self>) -> Self {
         let tree = cx.new(|cx| TreeState::new(cx));
@@ -138,12 +357,20 @@ impl Explorer {
                 }
             }),
             cx.observe(&tree, |_, _, cx| cx.notify()),
+            cx.subscribe(&tree, |this, _, event, cx| {
+                if let TreeEvent::Expanded(id) = event {
+                    this.load(id, cx);
+                }
+            }),
         ];
         let mut this = Self {
             data_sources,
             tree,
             items: Vec::new(),
             meta: Rc::default(),
+            nodes: Rc::default(),
+            suffixes: Rc::default(),
+            unloaded: HashMap::new(),
             auto_opened: HashSet::new(),
             _subscriptions: subscriptions,
         };
@@ -157,6 +384,8 @@ impl Explorer {
 
         let ds = self.data_sources.read(cx);
         let mut meta = HashMap::new();
+        let (mut nodes, mut suffixes, mut unloaded) =
+            (HashMap::new(), HashMap::new(), HashMap::new());
         let items: Vec<TreeItem> = ds
             .connections()
             .iter()
@@ -188,8 +417,15 @@ impl Explorer {
                         // Once per session, open the path to the current database
                         // and its default schema, like DataGrip does.
                         let auto_open = self.auto_opened.insert(config.id);
+                        let mut builder = Builder {
+                            ds,
+                            session,
+                            nodes: &mut nodes,
+                            suffixes: &mut suffixes,
+                            unloaded: &mut unloaded,
+                        };
                         source.children(session.catalog().databases.iter().map(|db| {
-                            let item = database_item(config, db);
+                            let item = builder.database(config, db);
                             if db.is_current && auto_open {
                                 expanded.insert(format!("source:{}", config.id).into());
                                 expanded.insert(item.id.clone());
@@ -221,6 +457,9 @@ impl Explorer {
         let items = apply(items, &expanded);
 
         self.meta = Rc::new(meta);
+        self.nodes = Rc::new(nodes);
+        self.suffixes = Rc::new(suffixes);
+        self.unloaded = unloaded;
         self.items = items.clone();
         // `set_items` clears the selection, and the console runs against the
         // selected source, so carry it over: the same row if it still exists,
@@ -237,7 +476,45 @@ impl Explorer {
                 }
             }
         });
+        self.load_expanded(cx);
         cx.notify();
+    }
+
+    /// Starts the load of `id`'s children if they aren't loaded.
+    fn load(&mut self, id: &SharedString, cx: &mut Context<Self>) {
+        let Some(node) = self.unloaded.get(id) else {
+            return;
+        };
+        let (connection, target) = (node.connection, node.target());
+        // Not from inside a `DataSources` event, which rebuilds call us from.
+        let data_sources = self.data_sources.clone();
+        cx.defer(move |cx| data_sources.update(cx, |ds, cx| ds.load(connection, target, cx)));
+    }
+
+    /// Loads for rows left expanded with nothing loaded: auto-opened ones and
+    /// ones that stayed open across a Refresh.
+    fn load_expanded(&mut self, cx: &mut Context<Self>) {
+        fn walk(items: &[TreeItem], out: &mut Vec<SharedString>) {
+            for item in items.iter().filter(|i| i.is_expanded()) {
+                out.push(item.id.clone());
+                walk(&item.children, out);
+            }
+        }
+        let mut open = Vec::new();
+        walk(&self.items, &mut open);
+        for id in open {
+            self.load(&id, cx);
+        }
+    }
+
+    /// What the selected row refers to, if it is in a schema.
+    pub fn selected_node(&self, cx: &App) -> Option<NodeRef> {
+        let item = self.tree.read(cx).selected_item()?;
+        self.nodes.get(&item.id).cloned()
+    }
+
+    fn show_diagram(&mut self, node: NodeRef, cx: &mut Context<Self>) {
+        cx.emit(ExplorerEvent::ShowDiagram(node));
     }
 
     /// The connection of the selected row, if any.
@@ -300,6 +577,7 @@ impl Explorer {
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected_connection(cx);
+        let node = self.selected_node(cx);
         let connected = selected.is_some_and(|id| {
             matches!(
                 self.data_sources.read(cx).state(id),
@@ -379,6 +657,15 @@ impl Explorer {
             .child(
                 button("ex-ddl", Icon::new(Lucide::FileCode), "Show DDL (M2)").band_disabled(true),
             )
+            .child(
+                button("ex-diagram", Icon::new(Lucide::Workflow), "Show diagram")
+                    .band_disabled(node.is_none())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(node) = node.clone() {
+                            this.show_diagram(node, cx);
+                        }
+                    })),
+            )
             .child(button("ex-dump", Icon::new(Lucide::Download), "Dump… (M4)").band_disabled(true))
             .child(
                 button("ex-import", Icon::new(Lucide::Upload), "Import… (M4)").band_disabled(true),
@@ -443,6 +730,10 @@ fn node_icon(entry: &TreeEntry) -> Icon {
         "group" if entry.is_expanded() => Icon::new(IconName::FolderOpen),
         "group" => Icon::new(IconName::Folder),
         "table" => Icon::new(Lucide::Table),
+        "column" => Icon::new(Lucide::Columns3),
+        "pkcolumn" => Icon::new(Lucide::KeyRound),
+        "fkcolumn" | "fk" => Icon::new(Lucide::Link2),
+        "index" => Icon::new(Lucide::Key),
         "view" => Icon::new(IconName::Eye),
         "function" => Icon::new(Lucide::Braces),
         "sequence" => Icon::new(Lucide::ListOrdered),
@@ -455,6 +746,8 @@ impl Render for Explorer {
         let theme = cx.theme().clone();
         let empty = self.data_sources.read(cx).connections().is_empty();
         let meta = self.meta.clone();
+        let suffixes = self.suffixes.clone();
+        let nodes = self.nodes.clone();
         let this = cx.entity().downgrade();
         let menu_target = cx.entity().downgrade();
 
@@ -499,8 +792,8 @@ impl Render for Explorer {
                                 .then(|| connection_of(&id))
                                 .flatten();
                             let source_meta = source.and_then(|c| meta.get(&c).cloned());
-                            let count =
-                                (kind_of(&id) == "group").then(|| entry.item().children.len());
+                            let suffix = suffixes.get(&id).cloned();
+                            let info = kind_of(&id) == "info";
                             let icon = node_icon(entry).small().text_color(
                                 source_meta
                                     .as_ref()
@@ -525,15 +818,14 @@ impl Render for Explorer {
                                         .gap_1p5()
                                         .text_sm()
                                         .child(chevron)
-                                        .child(icon)
-                                        .child(entry.item().label.clone())
-                                        .when_some(count, |el, n| {
-                                            el.child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(muted)
-                                                    .child(n.to_string()),
-                                            )
+                                        .when(!info, |el| el.child(icon))
+                                        .child(
+                                            div()
+                                                .when(info, |el| el.italic().text_color(muted))
+                                                .child(entry.item().label.clone()),
+                                        )
+                                        .when_some(suffix, |el, text| {
+                                            el.child(div().text_xs().text_color(muted).child(text))
                                         })
                                         .when_some(source_meta.map(|m| m.status), |el, status| {
                                             match status {
@@ -581,6 +873,21 @@ impl Render for Explorer {
                                     target.update(cx, |this, cx| f(this, id, window, cx)).ok();
                                 })
                             };
+                            let menu = match nodes.get(&entry.item().id).cloned() {
+                                Some(node) => {
+                                    let target = target.clone();
+                                    menu.item(PopupMenuItem::new("Show diagram").on_click(
+                                        move |_, _, cx| {
+                                            let node = node.clone();
+                                            target
+                                                .update(cx, |this, cx| this.show_diagram(node, cx))
+                                                .ok();
+                                        },
+                                    ))
+                                    .separator()
+                                }
+                                None => menu,
+                            };
                             menu.item(item("Connect", |this, id, _, cx| this.connect(id, cx)))
                                 .item(item("Disconnect", |this, id, _, cx| {
                                     this.disconnect(id, cx)
@@ -606,6 +913,37 @@ impl Explorer {
     pub fn select_first_source(&mut self, cx: &mut Context<Self>) {
         self.tree
             .update(cx, |tree, cx| tree.set_selected_index(Some(0), cx));
+    }
+
+    /// Expands the row at `path`, as a click would: the first visible row
+    /// labelled `path[0]`, then each next label among the previous row's
+    /// children.
+    pub fn expand(&mut self, path: &[&str], cx: &mut Context<Self>) {
+        fn find(items: &[TreeItem], label: &str) -> Option<TreeItem> {
+            items.iter().find_map(|item| {
+                if item.label.as_ref() == label {
+                    Some(item.clone())
+                } else if item.is_expanded() {
+                    find(&item.children, label)
+                } else {
+                    None
+                }
+            })
+        }
+        let mut item = find(&self.items, path[0]);
+        for label in &path[1..] {
+            item = item.and_then(|i| {
+                i.children
+                    .iter()
+                    .find(|c| c.label.as_ref() == *label)
+                    .cloned()
+            });
+        }
+        let item = item.unwrap_or_else(|| panic!("no row {path:?}"));
+        let id = item.id.clone();
+        drop(item.expanded(true));
+        self.rebuild(cx);
+        self.load(&id, cx);
     }
 
     /// Labels of the rows a user would see (expanded paths only), depth-first.

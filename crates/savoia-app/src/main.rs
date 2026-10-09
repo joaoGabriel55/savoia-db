@@ -2,6 +2,8 @@ mod assets;
 mod connection_form;
 mod console;
 mod data_sources;
+mod diagram;
+mod erd_layout;
 mod explorer;
 mod results;
 mod runtime;

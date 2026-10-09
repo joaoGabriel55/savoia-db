@@ -13,7 +13,8 @@ use savoia_store::{ConnectionStore, MemorySecrets};
 use crate::connection_form::ConnectionForm;
 use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, RefreshState, SourceState};
-use crate::explorer::Explorer;
+use crate::diagram::ErDiagram;
+use crate::explorer::{Explorer, NodeRef};
 use crate::session::Session;
 
 fn mount(
@@ -124,9 +125,18 @@ fn save_and_connect(cx: &mut TestAppContext, url: &str) -> (Entity<DataSources>,
     (ds, explorer)
 }
 
+/// The visible tree rows once nothing shown is loading any more.
+fn settled_labels(cx: &mut TestAppContext, explorer: &Entity<Explorer>) -> Vec<String> {
+    let loading = |labels: &[String]| labels.iter().any(|l| l.ends_with('…'));
+    wait_until(cx, "the explorer to load", |cx| {
+        !loading(&explorer.read_with(cx, |e, _| e.visible_labels()))
+    });
+    explorer.read_with(cx, |e, _| e.visible_labels())
+}
+
 async fn save_connect_and_list(cx: &mut TestAppContext, url: &str) -> Vec<String> {
     let (_, explorer) = save_and_connect(cx, url);
-    explorer.read_with(cx, |e, _| e.visible_labels())
+    settled_labels(cx, &explorer)
 }
 
 /// Connects to `url` and opens a console on it, with the source selected.
@@ -443,4 +453,104 @@ async fn postgres_refresh_waits_for_the_running_query(cx: &mut TestAppContext) {
     });
     assert_eq!(refresh_state(cx, &ds), None);
     assert!(session_of(cx, &ds).is_none());
+}
+
+/// Runs `sql` to the end on the source's own session.
+fn exec(session: Arc<Session>, sql: &str) {
+    let sql = sql.to_owned();
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(crate::runtime::spawn(async move {
+        let result = async {
+            let mut query = session.execute(sql).await?;
+            while let Some(event) = query.next().await {
+                event?;
+            }
+            Ok::<_, savoia_core::AppError>(())
+        }
+        .await;
+        drop(tx.send(result));
+    }));
+    rx.recv_timeout(Duration::from_secs(15))
+        .expect("seed timed out")
+        .expect("seed failed");
+}
+
+const UI_SCHEMA: &str = "DROP SCHEMA IF EXISTS it_ui CASCADE;
+    CREATE SCHEMA it_ui;
+    CREATE TABLE it_ui.customers (id serial PRIMARY KEY, name text NOT NULL);
+    CREATE TABLE it_ui.orders (
+      id serial PRIMARY KEY,
+      customer_id int NOT NULL REFERENCES it_ui.customers (id),
+      placed_at timestamptz);
+    CREATE TABLE it_ui.notes (body text);";
+
+/// Expanding a schema loads its object names; expanding a table loads its
+/// columns and keys. The diagram of the schema joins the tables by their
+/// foreign keys.
+#[gpui_kit::test]
+async fn postgres_explorer_loads_on_expand_and_draws_the_diagram(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, explorer) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(session_of(cx, &ds).expect("connected"), UI_SCHEMA);
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+
+    let labels = settled_labels(cx, &explorer);
+    let schema = labels.iter().position(|l| l == "it_ui").expect("it_ui");
+    assert_ne!(
+        labels.get(schema + 1).map(String::as_str),
+        Some("tables"),
+        "not loaded before expanding"
+    );
+
+    explorer.update(cx, |e, cx| e.expand(&["it_ui"], cx));
+    let labels = settled_labels(cx, &explorer);
+    assert_eq!(
+        labels.get(schema + 1).map(String::as_str),
+        Some("tables"),
+        "{labels:?}"
+    );
+
+    explorer.update(cx, |e, cx| e.expand(&["it_ui", "tables"], cx));
+    explorer.update(cx, |e, cx| e.expand(&["it_ui", "tables", "orders"], cx));
+    let labels = settled_labels(cx, &explorer);
+    let orders = labels.iter().position(|l| l == "orders").expect("orders");
+    assert_eq!(
+        labels[orders + 1..orders + 6],
+        ["id", "customer_id", "placed_at", "foreign keys", "indexes"],
+        "{labels:?}"
+    );
+
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_ui".into(),
+        table: Some("orders".into()),
+    };
+    let (window, diagram) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|cx| ErDiagram::new(ds.clone(), node, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the diagram", |cx| {
+        diagram.read_with(cx, |d, _| d.loaded().is_some())
+    });
+    let (tables, lines) = diagram.read_with(cx, |d, _| d.loaded().unwrap());
+    assert_eq!(tables, ["customers", "notes", "orders"]);
+    assert_eq!(lines, 1);
+    assert_eq!(
+        diagram
+            .read_with(cx, |d, _| d.focused().map(str::to_owned))
+            .as_deref(),
+        Some("orders")
+    );
+    // Paints boxes and lines without panicking, and survives a reset.
+    click(cx, window, "erd-reset");
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
 }
