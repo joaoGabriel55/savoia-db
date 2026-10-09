@@ -43,7 +43,17 @@ SAVOIA_MYSQL_URL=mysql://savoia:savoia@127.0.0.1:33084/savoia \
 SAVOIA_SSH_TEST=1 cargo test --workspace
 ```
 
-`cargo test -p savoia-store -- --ignored` also runs a round trip through your real OS keychain.
+
+### Sample data
+
+`samples/` has a Serie A 2025-26 database for trying the explorer, ER diagram and console by hand. Clubs and stadiums are real (figures approximate); every person is invented. It has 20 clubs, 490 players, 380 fixtures (20 matchdays played, so later scores are `NULL`), views, a function, a procedure, and 150,000 `match_events` rows for paging and cancel.
+
+```sh
+docker exec -i savoia-db-postgres-17-1 psql -U savoia -d savoia < samples/serie_a.postgres.sql   # schema serie_a
+docker exec -i savoia-db-mysql-8.4-1 mysql -uroot -psavoia < samples/serie_a.mysql.sql          # database serie_a
+```
+
+To change the data, edit `samples/generate_serie_a.py` and run it; it rewrites both files with the same rows.
 
 ## UI conventions
 
