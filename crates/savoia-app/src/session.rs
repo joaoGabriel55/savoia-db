@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use savoia_core::{
-    AppError, AppResult, Catalog, Connection, ConnectionConfig, Driver, Engine, QueryEvent,
-    QueryHandle, Secrets, ServerInfo, TableInfo,
+    AppError, AppResult, Catalog, Connection, ConnectionConfig, Driver, Endpoint, Engine,
+    QueryEvent, QueryHandle, SchemaNode, Secrets, ServerInfo, TableInfo,
 };
 use savoia_mysql::MysqlDriver;
 use savoia_pg::PgDriver;
@@ -29,8 +29,23 @@ pub struct Session {
     /// One operation at a time on `conn`. See
     /// `docs/adr/202610091309-serialize-all-work-on-one-connection-per-session.md`.
     gate: Arc<Mutex<()>>,
-    // Dropped after the connection; keeps the forward alive meanwhile.
+    /// Catalog-only connections to the other Postgres databases the user
+    /// opened, by name. See
+    /// `docs/adr/202610091856-open-a-catalog-connection-per-other-postgres-database.md`.
+    others: RwLock<HashMap<String, Arc<Other>>>,
+    /// Held while opening one of `others`, so two loads don't both open it.
+    opening: Mutex<()>,
+    /// How `conn` was reached (through the tunnel, if any), for `others`.
+    endpoint: Endpoint,
+    secrets: Secrets,
+    // Dropped after the connections; keeps the forward alive meanwhile.
     _tunnel: Option<Tunnel>,
+}
+
+/// A connection to another database of the server, with its own gate.
+struct Other {
+    conn: Arc<dyn Connection>,
+    gate: Arc<Mutex<()>>,
 }
 
 fn driver(engine: Engine) -> &'static dyn Driver {
@@ -44,7 +59,7 @@ async fn connect(
     config: &ConnectionConfig,
     secrets: &Secrets,
     policy: HostKeyPolicy,
-) -> AppResult<(Box<dyn Connection>, Option<Tunnel>)> {
+) -> AppResult<(Box<dyn Connection>, Endpoint, Option<Tunnel>)> {
     config.validate()?;
     let (endpoint, tunnel) = match &config.ssh {
         Some(ssh) => {
@@ -59,7 +74,7 @@ async fn connect(
         None => (config.endpoint(), None),
     };
     let conn = driver(config.engine).connect(&endpoint, secrets).await?;
-    Ok((conn, tunnel))
+    Ok((conn, endpoint, tunnel))
 }
 
 pub async fn open(
@@ -67,13 +82,17 @@ pub async fn open(
     secrets: Secrets,
     policy: HostKeyPolicy,
 ) -> AppResult<Session> {
-    let (conn, tunnel) = connect(&config, &secrets, policy).await?;
+    let (conn, endpoint, tunnel) = connect(&config, &secrets, policy).await?;
     let catalog = conn.catalog().await?;
     Ok(Session {
         catalog: RwLock::new(Arc::new(catalog)),
         tables: RwLock::default(),
         conn: Arc::from(conn),
         gate: Arc::default(),
+        others: RwLock::default(),
+        opening: Mutex::default(),
+        endpoint,
+        secrets,
         _tunnel: tunnel,
     })
 }
@@ -88,15 +107,29 @@ impl Session {
         self.gate.try_lock().is_err()
     }
 
+    /// [`Self::is_busy`] for the connection that serves `database`.
+    pub fn is_busy_on(&self, database: &str) -> bool {
+        self.route(database).1.try_lock().is_err()
+    }
+
     /// The details of a table, if loaded.
     pub fn table(&self, database: &str, schema: &str, table: &str) -> Option<Arc<TableInfo>> {
         let key = (database.to_owned(), schema.to_owned(), table.to_owned());
         read(&self.tables).get(&key).cloned()
     }
 
-    /// Waits for the gate, then reloads the catalog on this connection, and
-    /// the object names of the schemas that were loaded before. Runs on the
-    /// I/O runtime.
+    /// The connection and gate that serve `database`'s catalog: its own
+    /// connection if one is open, else the session's.
+    fn route(&self, database: &str) -> (Arc<dyn Connection>, Arc<Mutex<()>>) {
+        match read(&self.others).get(database) {
+            Some(other) => (other.conn.clone(), other.gate.clone()),
+            None => (self.conn.clone(), self.gate.clone()),
+        }
+    }
+
+    /// Waits for the gate, then reloads the catalog on this connection, the
+    /// schemas of the other databases opened before, and the object names
+    /// of the schemas that were loaded before. Runs on the I/O runtime.
     pub async fn reload_catalog(&self) -> AppResult<()> {
         let loaded: Vec<(String, String)> = self
             .catalog()
@@ -105,22 +138,93 @@ impl Session {
             .flat_map(|d| {
                 d.schemas
                     .iter()
+                    .flatten()
                     .filter(|s| s.objects.is_some())
                     .map(|s| (d.name.clone(), s.name.clone()))
             })
             .collect();
-        let catalog = {
+        let mut catalog = {
             let _guard = self.gate.lock().await;
-            let mut catalog = self.conn.catalog().await?;
-            for (database, schema) in loaded {
-                if let Some(node) = catalog.schema_mut(&database, &schema) {
-                    node.objects = Some(self.conn.list_objects(&database, &schema).await?);
-                }
-            }
-            catalog
+            self.conn.catalog().await?
         };
+        // Close the connections of databases that are gone.
+        write(&self.others).retain(|name, _| catalog.database(name).is_some());
+        let others: Vec<(String, Arc<Other>)> = read(&self.others)
+            .iter()
+            .map(|(name, other)| (name.clone(), other.clone()))
+            .collect();
+        for (name, other) in others {
+            let schemas = {
+                let _guard = other.gate.lock().await;
+                current_schemas(other.conn.catalog().await?)
+            };
+            if let Some(node) = catalog.database_mut(&name) {
+                node.schemas = Some(schemas);
+            }
+        }
+        for (database, schema) in loaded {
+            if catalog.schema(&database, &schema).is_none() {
+                continue;
+            }
+            let (conn, gate) = self.route(&database);
+            let objects = {
+                let _guard = gate.lock().await;
+                conn.list_objects(&database, &schema).await?
+            };
+            if let Some(node) = catalog.schema_mut(&database, &schema) {
+                node.objects = Some(objects);
+            }
+        }
         *write(&self.catalog) = Arc::new(catalog);
         write(&self.tables).clear();
+        Ok(())
+    }
+
+    /// Opens a connection to another Postgres database of the server, if
+    /// not open yet, and loads its schemas into the catalog. Runs on the
+    /// I/O runtime.
+    pub async fn load_schemas(&self, database: &str) -> AppResult<()> {
+        if self
+            .catalog()
+            .database(database)
+            .is_none_or(|d| d.is_current)
+        {
+            return Err(AppError::internal(format!(
+                "\"{database}\" has no schemas to load"
+            )));
+        }
+        let other = {
+            let _opening = self.opening.lock().await;
+            let open = read(&self.others).get(database).cloned();
+            match open {
+                Some(other) => other,
+                None => {
+                    let endpoint = Endpoint {
+                        database: Some(database.to_owned()),
+                        ..self.endpoint.clone()
+                    };
+                    let conn = driver(self.endpoint.engine)
+                        .connect(&endpoint, &self.secrets)
+                        .await?;
+                    let other = Arc::new(Other {
+                        conn: Arc::from(conn),
+                        gate: Arc::default(),
+                    });
+                    write(&self.others).insert(database.to_owned(), other.clone());
+                    other
+                }
+            }
+        };
+        let schemas = {
+            let _guard = other.gate.lock().await;
+            current_schemas(other.conn.catalog().await?)
+        };
+        let mut catalog = write(&self.catalog);
+        let mut updated = Catalog::clone(&catalog);
+        if let Some(node) = updated.database_mut(database) {
+            node.schemas = Some(schemas);
+        }
+        *catalog = Arc::new(updated);
         Ok(())
     }
 
@@ -128,8 +232,9 @@ impl Session {
     /// the catalog. Runs on the I/O runtime.
     pub async fn load_objects(&self, database: &str, schema: &str) -> AppResult<()> {
         let objects = {
-            let _guard = self.gate.lock().await;
-            self.conn.list_objects(database, schema).await?
+            let (conn, gate) = self.route(database);
+            let _guard = gate.lock().await;
+            conn.list_objects(database, schema).await?
         };
         let mut catalog = write(&self.catalog);
         let mut updated = Catalog::clone(&catalog);
@@ -149,8 +254,9 @@ impl Session {
         table: &str,
     ) -> AppResult<Arc<TableInfo>> {
         let info = {
-            let _guard = self.gate.lock().await;
-            Arc::new(self.conn.describe_table(database, schema, table).await?)
+            let (conn, gate) = self.route(database);
+            let _guard = gate.lock().await;
+            Arc::new(conn.describe_table(database, schema, table).await?)
         };
         let key = (database.to_owned(), schema.to_owned(), table.to_owned());
         write(&self.tables).insert(key, info.clone());
@@ -161,8 +267,9 @@ impl Session {
     /// as loaded table details too. Runs on the I/O runtime.
     pub async fn describe_schema(&self, database: &str, schema: &str) -> AppResult<Vec<TableInfo>> {
         let tables = {
-            let _guard = self.gate.lock().await;
-            self.conn.describe_schema(database, schema).await?
+            let (conn, gate) = self.route(database);
+            let _guard = gate.lock().await;
+            conn.describe_schema(database, schema).await?
         };
         let mut cache = write(&self.tables);
         for table in &tables {
@@ -215,6 +322,16 @@ impl Drop for RunningQuery {
     }
 }
 
+/// The schemas of the database a catalog was loaded on.
+fn current_schemas(catalog: Catalog) -> Vec<SchemaNode> {
+    catalog
+        .databases
+        .into_iter()
+        .find(|d| d.is_current)
+        .and_then(|d| d.schemas)
+        .unwrap_or_default()
+}
+
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
     lock.read().unwrap_or_else(|e| e.into_inner())
 }
@@ -229,7 +346,7 @@ pub async fn test(
     secrets: Secrets,
     policy: HostKeyPolicy,
 ) -> AppResult<ServerInfo> {
-    let (conn, tunnel) = connect(&config, &secrets, policy).await?;
+    let (conn, _, tunnel) = connect(&config, &secrets, policy).await?;
     let info = conn.server_info().await;
     conn.close().await;
     if let Some(tunnel) = tunnel {
@@ -251,8 +368,8 @@ mod tests {
 
     use async_trait::async_trait;
     use savoia_core::{
-        AppResult, Cancel, CancelHandle, Catalog, Connection, QueryHandle, QuerySender,
-        SchemaObjects, ServerInfo, TableInfo,
+        AppResult, Cancel, CancelHandle, Catalog, Connection, ConnectionConfig, Engine,
+        QueryHandle, QuerySender, SchemaObjects, Secrets, ServerInfo, TableInfo,
     };
     use tokio::sync::Mutex;
 
@@ -323,6 +440,10 @@ mod tests {
             tables: RwLock::default(),
             conn: fake.clone(),
             gate: Arc::new(Mutex::new(())),
+            others: RwLock::default(),
+            opening: Mutex::default(),
+            endpoint: ConnectionConfig::new(Engine::Postgres).endpoint(),
+            secrets: Secrets::default(),
             _tunnel: None,
         });
         let mut query = session.execute("SELECT 1".into()).await.unwrap();

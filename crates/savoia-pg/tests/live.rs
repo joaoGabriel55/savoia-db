@@ -63,8 +63,8 @@ async fn connects_and_reads_catalog() {
         .find(|d| d.is_current)
         .expect("current db");
     assert_eq!(Some(current.name.as_str()), config.database.as_deref());
-    let schema = current
-        .schemas
+    let schemas = current.schemas.as_deref().expect("current schemas load");
+    let schema = schemas
         .iter()
         .find(|s| s.name == "it_catalog")
         .expect("seeded schema");
@@ -78,7 +78,7 @@ async fn connects_and_reads_catalog() {
         (2, 1, 1)
     );
     assert_eq!(schema.counts.sequences, 1);
-    assert!(current.schemas.iter().all(|s| !s.name.starts_with("pg_")));
+    assert!(schemas.iter().all(|s| !s.name.starts_with("pg_")));
 
     let db = current.name.clone();
     let objects = conn.list_objects(&db, "it_catalog").await.expect("objects");

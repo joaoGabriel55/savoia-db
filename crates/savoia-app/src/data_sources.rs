@@ -44,6 +44,10 @@ impl Drop for Refresh {
 /// Part of a connected source's catalog that loads when its tree node opens.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LoadTarget {
+    /// The schemas of another Postgres database, on a connection of its own.
+    Schemas {
+        database: String,
+    },
     Objects {
         database: String,
         schema: String,
@@ -91,6 +95,13 @@ pub enum DataSourcesEvent {
         id: ConnectionId,
         host: String,
         fingerprint: String,
+    },
+    /// The server refused the login: no password was stored, or the stored
+    /// one is wrong. Ask for it, then call [`DataSources::connect_with_password`].
+    NeedsPassword {
+        id: ConnectionId,
+        /// Why the last attempt failed, when a password was tried.
+        error: Option<String>,
     },
     Error(String),
 }
@@ -191,13 +202,19 @@ impl DataSources {
         let Some(session) = self.session(id) else {
             return;
         };
-        let state = if session.is_busy() {
+        let database = match &target {
+            LoadTarget::Schemas { database }
+            | LoadTarget::Objects { database, .. }
+            | LoadTarget::Table { database, .. } => database,
+        };
+        let state = if session.is_busy_on(database) {
             LoadState::Waiting
         } else {
             LoadState::Loading
         };
         let io = runtime::spawn(async move {
             match target {
+                LoadTarget::Schemas { database } => session.load_schemas(&database).await,
                 LoadTarget::Objects { database, schema } => {
                     session.load_objects(&database, &schema).await
                 }
@@ -341,6 +358,28 @@ impl DataSources {
     }
 
     pub fn connect(&mut self, id: ConnectionId, policy: HostKeyPolicy, cx: &mut Context<Self>) {
+        self.start_connect(id, policy, None, cx);
+    }
+
+    /// Connects with the password the user just typed in place of the
+    /// stored one. Once it works, it is kept for this run, and saved too
+    /// if the connection saves passwords.
+    pub fn connect_with_password(
+        &mut self,
+        id: ConnectionId,
+        password: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_connect(id, HostKeyPolicy::KnownOnly, Some(password), cx);
+    }
+
+    fn start_connect(
+        &mut self,
+        id: ConnectionId,
+        policy: HostKeyPolicy,
+        password: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(config) = self.get(id).cloned() else {
             return;
         };
@@ -352,12 +391,20 @@ impl DataSources {
 
         let secrets = self.load_secrets(id);
         cx.spawn(async move |this, cx| {
+            let mut tried = false;
             let result = async {
-                let secrets = secrets.await?;
-                session::join(runtime::spawn(session::open(config, secrets, policy))).await
+                let mut secrets = secrets.await?;
+                let entered = password.is_some();
+                if entered {
+                    secrets.password = password;
+                }
+                tried = secrets.password.as_ref().is_some_and(|p| !p.is_empty());
+                let open = session::open(config, secrets.clone(), policy);
+                let session = session::join(runtime::spawn(open)).await?;
+                Ok((session, entered.then_some(secrets)))
             }
             .await;
-            this.update(cx, |this, cx| this.finish_connect(id, result, cx))
+            this.update(cx, |this, cx| this.finish_connect(id, result, tried, cx))
                 .ok();
         })
         .detach();
@@ -366,13 +413,17 @@ impl DataSources {
     fn finish_connect(
         &mut self,
         id: ConnectionId,
-        result: AppResult<Session>,
+        result: AppResult<(Session, Option<Secrets>)>,
+        tried_password: bool,
         cx: &mut Context<Self>,
     ) {
         let state = match result {
-            Ok(session) => {
+            Ok((session, entered)) => {
                 if let Some(store) = &self.store {
                     drop(store.touch(id, SystemTime::now()));
+                }
+                if let Some(secrets) = entered {
+                    self.remember(id, secrets, cx);
                 }
                 SourceState::Connected(Arc::new(session))
             }
@@ -384,6 +435,13 @@ impl DataSources {
                 });
                 SourceState::Disconnected
             }
+            Err(err @ AppError::Auth { .. }) => {
+                cx.emit(DataSourcesEvent::NeedsPassword {
+                    id,
+                    error: tried_password.then(|| err.to_string()),
+                });
+                SourceState::Failed(err.to_string())
+            }
             Err(err) => {
                 let name = self.get(id).map(|c| c.display_name()).unwrap_or_default();
                 cx.emit(DataSourcesEvent::Error(format!("{name}: {err}")));
@@ -392,6 +450,28 @@ impl DataSources {
         };
         self.set_state(id, state);
         cx.emit(DataSourcesEvent::Changed);
+    }
+
+    /// Keeps secrets that just worked for this run, and in the secrets file
+    /// if the connection saves passwords.
+    fn remember(&mut self, id: ConnectionId, secrets: Secrets, cx: &mut Context<Self>) {
+        drop(self.session_secrets.save(id, &secrets));
+        if !self.get(id).is_some_and(|c| c.save_password) {
+            return;
+        }
+        let saved = self.saved_secrets.clone();
+        cx.spawn(async move |this, cx| {
+            let result = runtime::spawn_blocking(move || saved.save(id, &secrets));
+            if let Err(err) = session::join(result).await {
+                this.update(cx, |_, cx| {
+                    cx.emit(DataSourcesEvent::Error(format!(
+                        "Could not store the password: {err}"
+                    )))
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     /// Reloads the catalog of a connected source on its own connection,

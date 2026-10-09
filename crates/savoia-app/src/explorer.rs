@@ -54,8 +54,8 @@ pub struct Explorer {
     nodes: Rc<HashMap<SharedString, NodeRef>>,
     /// Muted text after a row's label, by row id.
     suffixes: Rc<HashMap<SharedString, SharedString>>,
-    /// Rows whose children load when they are expanded.
-    unloaded: HashMap<SharedString, NodeRef>,
+    /// Rows whose children load when they are expanded, with what loads them.
+    unloaded: HashMap<SharedString, (ConnectionId, LoadTarget)>,
     /// Sessions whose current database was already expanded automatically.
     auto_opened: HashSet<ConnectionId>,
     _subscriptions: Vec<Subscription>,
@@ -134,7 +134,7 @@ struct Builder<'a> {
     /// Muted text after a row's label: counts, column types.
     suffixes: &'a mut HashMap<SharedString, SharedString>,
     /// Rows whose children aren't loaded, with what loads them.
-    unloaded: &'a mut HashMap<SharedString, NodeRef>,
+    unloaded: &'a mut HashMap<SharedString, (ConnectionId, LoadTarget)>,
 }
 
 impl Builder<'_> {
@@ -145,13 +145,19 @@ impl Builder<'_> {
     }
 
     /// The one child of a row whose children are still loading.
-    fn pending(&mut self, parent: &TreeItem, node: &NodeRef) -> TreeItem {
-        self.unloaded.insert(parent.id.clone(), node.clone());
-        let text = match self.ds.load_state(node.connection, &node.target()) {
+    fn pending(
+        &mut self,
+        parent: &TreeItem,
+        connection: ConnectionId,
+        target: LoadTarget,
+    ) -> TreeItem {
+        let text = match self.ds.load_state(connection, &target) {
             Some(LoadState::Waiting) => "waiting for the running query…".to_string(),
             Some(LoadState::Failed(err)) => format!("failed: {err}"),
             Some(LoadState::Loading) | None => "loading…".to_string(),
         };
+        self.unloaded
+            .insert(parent.id.clone(), (connection, target));
         TreeItem::new(format!("info:{}", parent.id), text)
     }
 
@@ -166,7 +172,7 @@ impl Builder<'_> {
         self.suffixes
             .insert(parent.id.clone(), count_summary(&schema.counts).into());
         let Some(objects) = &schema.objects else {
-            return vec![self.pending(parent, node)];
+            return vec![self.pending(parent, node.connection, node.target())];
         };
         let mut out = vec![
             self.group(prefix, "tables", "table", &objects.tables, node),
@@ -213,7 +219,7 @@ impl Builder<'_> {
     fn table_children(&mut self, parent: &TreeItem, node: &NodeRef) -> Vec<TreeItem> {
         let table = node.table.as_deref().unwrap_or_default();
         let Some(info) = self.session.table(&node.database, &node.schema, table) else {
-            return vec![self.pending(parent, node)];
+            return vec![self.pending(parent, node.connection, node.target())];
         };
         let prefix = &parent.id[parent.id.find(':').map_or(0, |i| i + 1)..];
         let mut out: Vec<TreeItem> = info
@@ -286,8 +292,15 @@ impl Builder<'_> {
         let id = format!("database:{prefix}");
         if config.engine.has_schemas() {
             let item = TreeItem::new(id, db.name.clone());
-            let children: Vec<TreeItem> = db
-                .schemas
+            let Some(schemas) = &db.schemas else {
+                // Another Postgres database: its schemas load on expand.
+                let target = LoadTarget::Schemas {
+                    database: db.name.clone(),
+                };
+                let pending = self.pending(&item, config.id, target);
+                return item.children(vec![pending]);
+            };
+            let children: Vec<TreeItem> = schemas
                 .iter()
                 .map(|schema| {
                     let prefix = format!("{prefix}/{}", schema.name);
@@ -305,7 +318,7 @@ impl Builder<'_> {
             item.children(children)
         } else {
             // MySQL: the database is its own one schema.
-            let Some(schema) = db.schemas.first() else {
+            let Some(schema) = db.schemas.iter().flatten().next() else {
                 return TreeItem::new(id, db.name.clone());
             };
             let node = NodeRef {
@@ -491,10 +504,9 @@ impl Explorer {
 
     /// Starts the load of `id`'s children if they aren't loaded.
     fn load(&mut self, id: &SharedString, cx: &mut Context<Self>) {
-        let Some(node) = self.unloaded.get(id) else {
+        let Some((connection, target)) = self.unloaded.get(id).cloned() else {
             return;
         };
-        let (connection, target) = (node.connection, node.target());
         // Not from inside a `DataSources` event, which rebuilds call us from.
         let data_sources = self.data_sources.clone();
         cx.defer(move |cx| data_sources.update(cx, |ds, cx| ds.load(connection, target, cx)));

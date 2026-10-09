@@ -26,8 +26,8 @@ Already shipped: lazy schema tree with counts, ER diagrams, streamed execute, ca
 
 | # | Task | Done when | Est. |
 |---|------|-----------|------|
-| 1.1 | [ ] Password prompt on connect | Connecting with no stored password asks for it instead of failing with an auth error. | ½ day |
-| 1.2 | [ ] Lazy-load non-current Postgres databases | Expanding another database opens a connection to it and loads its schemas. | 1 day |
+| 1.1 | [x] Password prompt on connect | Connecting with no stored password asks for it instead of failing with an auth error. | ½ day |
+| 1.2 | [x] Lazy-load non-current Postgres databases | Expanding another database opens a connection to it and loads its schemas. | 1 day |
 
 ## Next: M3 (Data editing), about 2 weeks
 

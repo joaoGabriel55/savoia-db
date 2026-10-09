@@ -95,6 +95,11 @@ fn map_connect_error(err: tokio_postgres::Error) -> AppError {
         {
             AppError::auth(db_message(&err))
         }
+        // The server asked for a password and none was given. The client
+        // reports it as a configuration error, with no code.
+        None if db_message(&err).ends_with("password missing") => {
+            AppError::auth("the server asks for a password")
+        }
         _ => AppError::connect(db_message(&err)),
     }
 }
@@ -135,7 +140,7 @@ impl PgConnection {
     }
 
     /// Fails for databases other than the connected one: their catalogs
-    /// need a session of their own.
+    /// need a connection of their own.
     fn check_database(&self, database: &str) -> AppResult<()> {
         if database == self.database {
             Ok(())
@@ -172,11 +177,7 @@ impl Connection for PgConnection {
             .map(|name| {
                 let is_current = name == self.database;
                 DatabaseNode {
-                    schemas: if is_current {
-                        std::mem::take(&mut schemas)
-                    } else {
-                        Vec::new()
-                    },
+                    schemas: is_current.then(|| std::mem::take(&mut schemas)),
                     name,
                     is_current,
                 }
