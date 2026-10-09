@@ -579,7 +579,7 @@ impl Render for ConnectionForm {
                     )
                     .child(
                         Checkbox::new("save-password")
-                            .label("Save passwords in the OS keychain")
+                            .label("Save passwords (readable only by your user)")
                             .checked(self.save_password)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 this.save_password = *checked;

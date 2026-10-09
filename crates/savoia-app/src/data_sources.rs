@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use savoia_core::{AppError, AppResult, ConnectionConfig, ConnectionId, Secrets};
-use savoia_store::{ConnectionStore, KeychainSecrets, MemorySecrets, SecretStore};
+use savoia_store::{ConnectionStore, FileSecrets, MemorySecrets, SecretStore};
 use savoia_tunnel::HostKeyPolicy;
 
 use crate::runtime;
@@ -97,10 +97,11 @@ pub enum DataSourcesEvent {
 
 pub struct DataSources {
     store: Option<ConnectionStore>,
-    /// Saved secrets: the OS keychain, or memory when no keychain is available.
+    /// Saved secrets: the user-only secrets file, or memory when there is no
+    /// data directory.
     saved_secrets: Arc<dyn SecretStore>,
     /// Secrets entered this session (always populated on save), so connecting
-    /// doesn't depend on a keychain round trip or on "save password".
+    /// doesn't depend on a file read or on "save password".
     session_secrets: Arc<MemorySecrets>,
     connections: Vec<ConnectionConfig>,
     states: HashMap<ConnectionId, SourceState>,
@@ -113,12 +114,11 @@ pub struct DataSources {
 impl EventEmitter<DataSourcesEvent> for DataSources {}
 
 impl DataSources {
-    /// Uses the app's SQLite file and the OS keychain.
+    /// Uses the app's SQLite file and secrets file.
     pub fn new(_: &mut Context<Self>) -> Self {
-        let saved_secrets: Arc<dyn SecretStore> = if KeychainSecrets::available() {
-            Arc::new(KeychainSecrets)
-        } else {
-            Arc::new(MemorySecrets::default())
+        let saved_secrets: Arc<dyn SecretStore> = match FileSecrets::open_default() {
+            Ok(file) => Arc::new(file),
+            Err(_) => Arc::new(MemorySecrets::default()),
         };
         Self::with_stores(ConnectionStore::open_default(), saved_secrets)
     }

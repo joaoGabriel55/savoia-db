@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [Store connection secrets in a user-only file](./202610091454-store-connection-secrets-in-a-user-only-file.md)
 
 ## Context
 

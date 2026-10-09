@@ -12,7 +12,7 @@ See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/adr/](docs/adr/README
 | `crates/savoia-core` | Domain types, connection config + URL import, driver traits, errors; no UI dependency |
 | `crates/savoia-pg` | PostgreSQL driver (tokio-postgres, rustls) |
 | `crates/savoia-mysql` | MySQL/MariaDB driver (mysql_async, rustls) |
-| `crates/savoia-store` | Saved connections (SQLite) and secrets (OS keychain) |
+| `crates/savoia-store` | Saved connections (SQLite) and secrets (a user-only `0600` file) |
 | `crates/savoia-tunnel` | SSH tunnels (russh) with known_hosts verification |
 
 ## Prerequisites
