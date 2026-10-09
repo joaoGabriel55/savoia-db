@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Editor, EditorState};
+use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::table::{DataTable, TableState};
@@ -21,6 +21,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::path::PathBuf;
+
+use savoia_core::export::Format;
 use savoia_core::{AppError, ConnectionId, Engine, QueryEvent, split};
 
 use crate::data_sources::{DataSources, SourceState};
@@ -91,6 +94,12 @@ pub struct QueryConsole {
     running: Option<Running>,
     /// Results and time of the last run, for the Output pane's header.
     summary: Option<SharedString>,
+    /// The engine of the last run, for copying results as SQL.
+    engine: Engine,
+    /// Quick filter over the rows of every result of the last run.
+    filter: Entity<InputState>,
+    /// A CSV export waiting for its result to finish loading.
+    pending_export: Option<(usize, PathBuf)>,
 }
 
 impl QueryConsole {
@@ -103,6 +112,13 @@ impl QueryConsole {
     ) -> Self {
         let editor = cx.new(|cx| EditorState::new(window, cx).language("sql"));
         cx.observe(&explorer, |_, _, cx| cx.notify()).detach();
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter rows"));
+        cx.subscribe(&filter, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.apply_filter(cx);
+            }
+        })
+        .detach();
         Self {
             data_sources,
             explorer,
@@ -113,7 +129,89 @@ impl QueryConsole {
             pane: Pane::Output,
             running: None,
             summary: None,
+            engine: Engine::Postgres,
+            filter,
+            pending_export: None,
         }
+    }
+
+    pub(crate) fn apply_filter(&mut self, cx: &mut Context<Self>) {
+        let text = self.filter.read(cx).value().to_string();
+        for tab in &self.results {
+            tab.table.update(cx, |table, cx| {
+                table.delegate_mut().set_filter(&text);
+                table.refresh(cx);
+            });
+        }
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn filter(&self) -> &Entity<InputState> {
+        &self.filter
+    }
+
+    /// Copies the shown rows of result `ix` as TSV.
+    pub(crate) fn copy_result(&self, ix: usize, cx: &mut Context<Self>) {
+        if let Some(tab) = self.results.get(ix) {
+            let text = tab.table.read(cx).delegate().export(Format::Tsv, None);
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    /// Asks where to save result `ix` as CSV, loading the rest of it first
+    /// if it is still streaming.
+    fn export_result(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let directory = std::env::home_dir().unwrap_or_default();
+        let path = cx.prompt_for_new_path(&directory, Some("result.csv"));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(path))) = path.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                let Some(tab) = this.results.get(ix) else {
+                    return;
+                };
+                match tab.table.read(cx).delegate().pacer().cloned() {
+                    Some(pacer) => {
+                        pacer.load_all();
+                        this.pending_export = Some((ix, path));
+                        this.log("Loading the rest of the result to export it…".into(), false);
+                        cx.notify();
+                    }
+                    None => this.write_export(ix, path, cx),
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn write_export(&mut self, ix: usize, path: PathBuf, cx: &mut Context<Self>) {
+        let Some(tab) = self.results.get(ix) else {
+            return;
+        };
+        let rows = tab.table.read(cx).delegate();
+        let (text, shown) = (rows.export(Format::Csv, None), rows.shown_len());
+        cx.spawn(async move |this, cx| {
+            let target = path.clone();
+            let written = session::join(runtime::spawn_blocking(move || {
+                std::fs::write(&target, text).map_err(AppError::storage)
+            }))
+            .await;
+            this.update(cx, |this, cx| {
+                match written {
+                    Ok(()) => this.log(
+                        format!("Exported {} to {}", count(shown, "row"), path.display()),
+                        false,
+                    ),
+                    Err(err) => this.log(format!("Export failed: {err}"), true),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     #[cfg(test)]
@@ -238,6 +336,7 @@ impl QueryConsole {
         let Some(engine) = self.data_sources.read(cx).get(id).map(|c| c.engine) else {
             return;
         };
+        self.engine = engine;
         let sql = self.sql(engine, script, cx);
         if sql.trim().is_empty() {
             return;
@@ -248,6 +347,9 @@ impl QueryConsole {
         self.output.clear();
         self.pane = Pane::Output;
         self.summary = None;
+        self.pending_export = None;
+        self.filter
+            .update(cx, |filter, cx| filter.set_value("", window, cx));
         let reader = cx.spawn_in(window, async move |this, cx| {
             let started = session::join(runtime::spawn(async move { session.execute(sql).await }));
             let mut query = match started.await {
@@ -336,6 +438,9 @@ impl QueryConsole {
         }
         self.stop_grid(cx);
         self.log(message, false);
+        if self.pending_export.take().is_some() {
+            self.log("Export cancelled".into(), true);
+        }
         self.summary = Some("cancelled".into());
         cx.notify();
     }
@@ -348,7 +453,7 @@ impl QueryConsole {
         cx: &mut Context<Self>,
     ) {
         let table = cx.new(|cx| {
-            let mut table = TableState::new(ResultSet::empty(), window, cx);
+            let mut table = TableState::new(ResultSet::empty(self.engine), window, cx);
             table.delegate_mut().start(meta, pacer);
             table.refresh(cx);
             table
@@ -395,6 +500,10 @@ impl QueryConsole {
         if rows.is_some() {
             self.set_last_summary(line.clone());
             self.stop_grid(cx);
+            let last = self.results.len().wrapping_sub(1);
+            if let Some((_, path)) = self.pending_export.take_if(|(ix, _)| *ix == last) {
+                self.write_export(last, path, cx);
+            }
         }
         self.log(line, false);
         cx.notify();
@@ -557,6 +666,10 @@ impl QueryConsole {
                     cx.notify();
                 }))
         };
+        let result_ix = match self.pane {
+            Pane::Result(ix) if ix < self.results.len() => Some(ix),
+            _ => None,
+        };
         let summary = match self.pane {
             Pane::Result(ix) => self.results.get(ix).map(|tab| tab.summary.clone()),
             Pane::Output => self.summary.clone(),
@@ -663,7 +776,30 @@ impl QueryConsole {
                             .flex_none()
                             .text_color(theme.muted_foreground)
                             .child(s)
-                    })),
+                    }))
+                    .when_some(result_ix, |this, ix| {
+                        this.child(div().w(px(160.)).child(Input::new(&self.filter).xsmall()))
+                            .child(
+                                Button::new("copy-result")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(IconName::Copy))
+                                    .tooltip("Copy the shown rows as TSV (right-click a row for more formats)")
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.copy_result(ix, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("export-result")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(Lucide::Download))
+                                    .tooltip("Export the shown rows to CSV…")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.export_result(ix, window, cx)
+                                    })),
+                            )
+                    }),
             )
             .child(body)
     }

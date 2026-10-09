@@ -899,3 +899,46 @@ async fn postgres_run_takes_the_statement_at_the_caret(cx: &mut TestAppContext) 
     let three = sql.find("SELECT 3").unwrap();
     assert_eq!(run_at(cx, three..sql.len()), (1, Some("3".into())));
 }
+
+/// The quick filter hides rows of the result; Copy takes the rows shown,
+/// with NULL kept apart from the empty string.
+#[gpui_kit::test]
+async fn postgres_result_filter_and_copy(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    run(
+        cx,
+        window,
+        &console,
+        "SELECT * FROM (VALUES (1, 'Roma'), (2, 'Torino'), (3, NULL), (4, '')) t(n, name)",
+    );
+    idle(cx, &console);
+    cx.update_window(window, |_, window, cx| {
+        let filter = console.read(cx).filter().clone();
+        filter.update(cx, |input, cx| input.set_value("tor", window, cx));
+        // Typing emits a change; `set_value` doesn't.
+        console.update(cx, |c, cx| c.apply_filter(cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        grid(cx, &console).1.last().map(String::as_str),
+        Some("Torino")
+    );
+
+    cx.update_window(window, |_, window, cx| {
+        let filter = console.read(cx).filter().clone();
+        filter.update(cx, |input, cx| input.set_value("", window, cx));
+        console.update(cx, |c, cx| c.apply_filter(cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    console.update(cx, |c, cx| c.copy_result(0, cx));
+    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    assert_eq!(
+        copied.as_deref(),
+        Some("n\tname\n1\tRoma\n2\tTorino\n3\t\\N\n4\t\n")
+    );
+}

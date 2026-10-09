@@ -6,8 +6,10 @@ mod connection;
 mod driver;
 mod engine;
 mod error;
+pub mod export;
 mod query;
 pub mod split;
+pub mod sql_text;
 
 pub use catalog::{
     Catalog, ColumnInfo, DatabaseNode, ForeignKey, IndexInfo, ObjectCounts, SchemaNode,
