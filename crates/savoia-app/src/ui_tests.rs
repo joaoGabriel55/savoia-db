@@ -21,6 +21,7 @@ use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, NodeRef};
 use crate::history::HistoryPanel;
 use crate::session::Session;
+use crate::structure::StructureView;
 use crate::workspace::{NewConsole, Workspace};
 
 fn mount(
@@ -995,4 +996,56 @@ async fn postgres_runs_are_kept_in_the_history(cx: &mut TestAppContext) {
     .unwrap();
     assert_eq!(panel.read_with(cx, |p, _| p.entries().len()), 1);
     assert_eq!(picked.borrow().as_deref(), Some("SELECT 41 + 1 AS answer"));
+}
+
+/// The Structure tab lists a table's columns, keys and indexes, and the
+/// DDL rebuilt from them.
+#[gpui_kit::test]
+async fn postgres_structure_shows_columns_keys_and_ddl(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        "DROP SCHEMA IF EXISTS it_structure CASCADE;
+         CREATE SCHEMA it_structure;
+         CREATE TABLE it_structure.teams (id int PRIMARY KEY, name text NOT NULL);
+         CREATE TABLE it_structure.players (
+           id int PRIMARY KEY,
+           team_id int REFERENCES it_structure.teams (id),
+           shirt int DEFAULT 10);
+         CREATE INDEX players_shirt ON it_structure.players (shirt);",
+    );
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_structure".into(),
+        table: Some("players".into()),
+    };
+    let (window, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|cx| StructureView::new(ds.clone(), node, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the structure", |cx| {
+        view.read_with(cx, |v, _| v.loaded().is_some())
+    });
+    let info = view.read_with(cx, |v, _| v.loaded().unwrap());
+    let columns: Vec<_> = info.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(columns, ["id", "team_id", "shirt"]);
+    let ddl = view.read_with(cx, |v, cx| v.ddl(cx).unwrap());
+    assert!(ddl.contains("\"shirt\" integer DEFAULT 10"), "{ddl}");
+    assert!(
+        ddl.contains("REFERENCES \"it_structure\".\"teams\" (\"id\")"),
+        "{ddl}"
+    );
+    assert!(ddl.contains("CREATE INDEX \"players_shirt\""), "{ddl}");
+    assert_eq!(info.foreign_keys.len(), 1);
+    // Draws without panicking.
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
 }

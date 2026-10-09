@@ -3,6 +3,7 @@
 
 mod catalog;
 mod connection;
+pub mod ddl;
 mod driver;
 mod engine;
 mod error;

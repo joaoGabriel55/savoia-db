@@ -21,6 +21,7 @@ use crate::data_sources::{DataSources, DataSourcesEvent, SourceState};
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
 use crate::memory::MemoryMeter;
+use crate::structure::StructureView;
 use crate::theme;
 
 actions!(workspace, [NewConsole]);
@@ -33,6 +34,7 @@ pub fn init(cx: &mut App) {
 enum Page {
     Console(Entity<QueryConsole>),
     Diagram(Entity<ErDiagram>),
+    Structure(Entity<StructureView>),
 }
 
 pub struct Workspace {
@@ -121,7 +123,7 @@ impl Workspace {
     pub fn consoles(&self) -> impl Iterator<Item = &Entity<QueryConsole>> {
         self.pages.iter().filter_map(|page| match page {
             Page::Console(console) => Some(console),
-            Page::Diagram(_) => None,
+            _ => None,
         })
     }
 
@@ -149,14 +151,14 @@ impl Workspace {
         }
         let found = self.pages.iter().rposition(|page| match page {
             Page::Console(console) => console.read(cx).source(cx) == Some(source),
-            Page::Diagram(_) => false,
+            _ => false,
         });
         match found {
             Some(index) => {
                 self.active = index;
                 match &self.pages[index] {
                     Page::Console(console) => console.clone(),
-                    Page::Diagram(_) => unreachable!(),
+                    _ => unreachable!(),
                 }
             }
             None => self.open_console(Some(source), window, cx),
@@ -167,7 +169,7 @@ impl Workspace {
     fn show_diagram(&mut self, node: NodeRef, cx: &mut Context<Self>) {
         let open = self.pages.iter().position(|page| match page {
             Page::Diagram(d) => d.read(cx).shows(&node),
-            Page::Console(_) => false,
+            _ => false,
         });
         match open {
             Some(i) => {
@@ -186,6 +188,24 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Opens the structure of `node`'s table, or brings its tab forward.
+    fn show_structure(&mut self, node: NodeRef, cx: &mut Context<Self>) {
+        let open = self.pages.iter().position(|page| match page {
+            Page::Structure(s) => s.read(cx).shows(&node),
+            _ => false,
+        });
+        self.active = match open {
+            Some(i) => i,
+            None => {
+                let data_sources = self.data_sources.clone();
+                let view = cx.new(|cx| StructureView::new(data_sources, node, cx));
+                self.pages.push(Page::Structure(view));
+                self.pages.len() - 1
+            }
+        };
+        cx.notify();
+    }
+
     fn on_explorer_event(
         &mut self,
         _: &Entity<Explorer>,
@@ -195,6 +215,7 @@ impl Workspace {
     ) {
         match event {
             ExplorerEvent::ShowDiagram(node) => self.show_diagram(node.clone(), cx),
+            ExplorerEvent::ShowStructure(node) => self.show_structure(node.clone(), cx),
             ExplorerEvent::Sql {
                 connection,
                 sql,
@@ -402,6 +423,12 @@ impl Render for Workspace {
                     Page::Diagram(diagram) => Tab::new()
                         .label(diagram.read(cx).title())
                         .prefix(Icon::new(Lucide::Workflow).small().ml_2().text_color(muted)),
+                    Page::Structure(view) => Tab::new().label(view.read(cx).title()).prefix(
+                        Icon::new(Lucide::TableProperties)
+                            .small()
+                            .ml_2()
+                            .text_color(muted),
+                    ),
                 };
                 tab.suffix(
                     Button::new(("close-tab", i))
@@ -421,6 +448,7 @@ impl Render for Workspace {
         let content = match self.pages.get(self.active) {
             Some(Page::Console(console)) => console.clone().into_any_element(),
             Some(Page::Diagram(diagram)) => diagram.clone().into_any_element(),
+            Some(Page::Structure(view)) => view.clone().into_any_element(),
             None => v_flex()
                 .size_full()
                 .items_center()

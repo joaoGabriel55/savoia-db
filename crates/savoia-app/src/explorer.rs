@@ -115,6 +115,8 @@ impl NodeRef {
 
 pub enum ExplorerEvent {
     ShowDiagram(NodeRef),
+    /// Open the structure of a table or view; the node has a table.
+    ShowStructure(NodeRef),
     /// SQL for a query console on `connection`.
     Sql {
         connection: ConnectionId,
@@ -623,6 +625,11 @@ impl Explorer {
             TableAction::ShowDiagram => {
                 if let Some(node) = self.nodes.get(&row).cloned() {
                     self.show_diagram(node, cx);
+                }
+            }
+            TableAction::Structure => {
+                if let Some(node) = self.nodes.get(&row).cloned() {
+                    cx.emit(ExplorerEvent::ShowStructure(node));
                 }
             }
             TableAction::CopyName => {

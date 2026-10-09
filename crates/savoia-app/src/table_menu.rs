@@ -136,6 +136,7 @@ impl ObjectRef {
 pub enum TableAction {
     OpenData,
     ShowDiagram,
+    Structure,
     NewSelect,
     CopyName,
     CopyQualifiedName,
@@ -204,7 +205,13 @@ pub fn build(
             Tone::Normal,
             TableAction::ShowDiagram,
         ))
-        .item(later(Icon::new(Lucide::TableProperties), "Structure", "M2"))
+        .item(item(
+            Icon::new(Lucide::TableProperties),
+            "Structure".into(),
+            Some("columns, keys, DDL".into()),
+            Tone::Normal,
+            TableAction::Structure,
+        ))
         .separator()
         .item(item(
             Icon::new(Lucide::SquarePen),

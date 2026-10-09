@@ -10,6 +10,7 @@ mod memory;
 mod results;
 mod runtime;
 mod session;
+mod structure;
 mod table_menu;
 mod theme;
 #[cfg(test)]
