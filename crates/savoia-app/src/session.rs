@@ -118,6 +118,15 @@ impl Session {
         read(&self.tables).get(&key).cloned()
     }
 
+    /// The loaded table details of `database`, by (schema, table).
+    pub fn tables_in(&self, database: &str) -> Vec<((String, String), Arc<TableInfo>)> {
+        read(&self.tables)
+            .iter()
+            .filter(|((db, _, _), _)| db == database)
+            .map(|((_, schema, table), info)| ((schema.clone(), table.clone()), info.clone()))
+            .collect()
+    }
+
     /// The connection and gate that serve `database`'s catalog: its own
     /// connection if one is open, else the session's.
     fn route(&self, database: &str) -> (Arc<dyn Connection>, Arc<Mutex<()>>) {

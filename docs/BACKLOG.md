@@ -19,7 +19,7 @@ Already shipped: lazy schema tree with counts, ER diagrams, streamed execute, ca
 | 2.4 | [x] Sort and filter in the result grid | `results.rs` | Click a header to sort the loaded rows; a quick filter hides non-matching rows. | ½ day |
 | 2.5 | [x] Query history | `savoia-store` (new migration), `console.rs` | Every run is saved with connection, time, duration and row count; a searchable panel re-opens a query in the console. | 1–1½ days |
 | 2.6 | [x] Table "Structure" view | `table_menu.rs` (item disabled, tagged M2), new view | Shows columns, indexes, FKs and DDL from `describe_table`. | 1 day |
-| 2.7 | [ ] Schema-aware completion | `console.rs`, completion provider | Suggests schemas, tables and columns from the loaded catalog, and JOIN conditions from FKs. | 2–3 days |
+| 2.7 | [x] Schema-aware completion | `console.rs`, completion provider | Suggests schemas, tables and columns from the loaded catalog, and JOIN conditions from FKs. | 2–3 days |
 | 2.8 | [ ] Close M2 | `PLAN.md` | M2 marked ✅; UI tests cover tabs, history and completion. | ¼ day |
 
 ## Debt carried from M1

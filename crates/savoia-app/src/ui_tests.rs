@@ -1049,3 +1049,63 @@ async fn postgres_structure_shows_columns_keys_and_ddl(cx: &mut TestAppContext) 
     cx.update_window(window, |_, window, cx| window.render_frame(cx))
         .unwrap();
 }
+
+/// Completion loads what it needs from the catalog, then suggests columns
+/// by alias and whole JOIN clauses from foreign keys.
+#[gpui_kit::test]
+async fn postgres_completion_suggests_columns_and_joins(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, console, window) = console_on(cx, &url);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        "DROP SCHEMA IF EXISTS it_complete CASCADE;
+         CREATE SCHEMA it_complete;
+         CREATE TABLE it_complete.customers (id int PRIMARY KEY, name text);
+         CREATE TABLE it_complete.orders (
+           id int PRIMARY KEY,
+           customer_id int REFERENCES it_complete.customers (id),
+           total numeric);",
+    );
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+
+    let complete = |cx: &mut TestAppContext, sql: &str| -> Vec<String> {
+        use gpui_kit::component::input::CompletionProvider as _;
+        let provider = crate::completion::SqlCompletion {
+            data_sources: ds.clone(),
+            console: console.downgrade(),
+        };
+        let rope = gpui_kit::component::Rope::from(sql);
+        let context = lsp_types::CompletionContext {
+            trigger_kind: lsp_types::CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        };
+        let task = cx
+            .update_window(window, |_, window, cx| {
+                provider.completions(&rope, sql.len(), context, window, cx)
+            })
+            .unwrap();
+        let done = Rc::new(RefCell::new(None));
+        let slot = done.clone();
+        cx.spawn(async move |_| *slot.borrow_mut() = Some(task.await))
+            .detach();
+        wait_until(cx, "the completions", |_| done.borrow().is_some());
+        let items = match done.take().unwrap().unwrap() {
+            lsp_types::CompletionResponse::Array(items) => items,
+            lsp_types::CompletionResponse::List(list) => list.items,
+        };
+        items.into_iter().map(|i| i.label).collect()
+    };
+
+    let columns = complete(cx, "SELECT * FROM it_complete.orders o WHERE o.");
+    assert_eq!(columns, ["id", "customer_id", "total"]);
+    let joins = complete(cx, "SELECT * FROM it_complete.orders o JOIN ");
+    assert_eq!(
+        joins.first().map(String::as_str),
+        Some("it_complete.customers c ON c.id = o.customer_id"),
+        "{joins:?}"
+    );
+}

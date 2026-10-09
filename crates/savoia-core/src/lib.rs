@@ -2,6 +2,7 @@
 //! This crate has no UI or database-driver dependencies.
 
 mod catalog;
+pub mod complete;
 mod connection;
 pub mod ddl;
 mod driver;

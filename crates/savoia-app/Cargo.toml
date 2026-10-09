@@ -10,7 +10,9 @@ name = "savoia-studio"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 gpui-kit.workspace = true
+lsp-types.workspace = true
 memory-stats.workspace = true
 savoia-core.workspace = true
 savoia-mysql.workspace = true

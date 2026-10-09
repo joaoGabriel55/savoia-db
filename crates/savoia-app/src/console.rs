@@ -28,6 +28,7 @@ use savoia_core::export::Format;
 use savoia_core::{AppError, ConnectionId, Engine, QueryEvent, split};
 use savoia_store::HistoryEntry;
 
+use crate::completion::SqlCompletion;
 use crate::data_sources::{DataSources, SourceState};
 use crate::explorer::Explorer;
 use crate::history::HistoryPanel;
@@ -120,6 +121,13 @@ impl QueryConsole {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| EditorState::new(window, cx).language("sql"));
+        let completion = SqlCompletion {
+            data_sources: data_sources.clone(),
+            console: cx.entity().downgrade(),
+        };
+        editor.update(cx, |editor, _| {
+            editor.lsp_mut().completion_provider = Some(Rc::new(completion));
+        });
         cx.observe(&explorer, |_, _, cx| cx.notify()).detach();
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter rows"));
         cx.subscribe(&filter, |this, _, event: &InputEvent, cx| {

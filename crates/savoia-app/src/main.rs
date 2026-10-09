@@ -1,4 +1,5 @@
 mod assets;
+mod completion;
 mod connection_form;
 mod console;
 mod data_sources;
