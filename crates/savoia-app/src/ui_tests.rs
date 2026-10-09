@@ -13,7 +13,8 @@ use savoia_store::{ConnectionStore, MemorySecrets};
 use crate::connection_form::ConnectionForm;
 use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, RefreshState, SourceState};
-use crate::explorer::Explorer;
+use crate::diagram::ErDiagram;
+use crate::explorer::{Explorer, NodeRef};
 use crate::session::Session;
 
 fn mount(
@@ -124,9 +125,18 @@ fn save_and_connect(cx: &mut TestAppContext, url: &str) -> (Entity<DataSources>,
     (ds, explorer)
 }
 
+/// The visible tree rows once nothing shown is loading any more.
+fn settled_labels(cx: &mut TestAppContext, explorer: &Entity<Explorer>) -> Vec<String> {
+    let loading = |labels: &[String]| labels.iter().any(|l| l.ends_with('…'));
+    wait_until(cx, "the explorer to load", |cx| {
+        !loading(&explorer.read_with(cx, |e, _| e.visible_labels()))
+    });
+    explorer.read_with(cx, |e, _| e.visible_labels())
+}
+
 async fn save_connect_and_list(cx: &mut TestAppContext, url: &str) -> Vec<String> {
     let (_, explorer) = save_and_connect(cx, url);
-    explorer.read_with(cx, |e, _| e.visible_labels())
+    settled_labels(cx, &explorer)
 }
 
 /// Connects to `url` and opens a console on it, with the source selected.
@@ -443,4 +453,206 @@ async fn postgres_refresh_waits_for_the_running_query(cx: &mut TestAppContext) {
     });
     assert_eq!(refresh_state(cx, &ds), None);
     assert!(session_of(cx, &ds).is_none());
+}
+
+/// Runs `sql` to the end on the source's own session.
+fn exec(session: Arc<Session>, sql: &str) {
+    let sql = sql.to_owned();
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(crate::runtime::spawn(async move {
+        let result = async {
+            let mut query = session.execute(sql).await?;
+            while let Some(event) = query.next().await {
+                event?;
+            }
+            Ok::<_, savoia_core::AppError>(())
+        }
+        .await;
+        drop(tx.send(result));
+    }));
+    rx.recv_timeout(Duration::from_secs(15))
+        .expect("seed timed out")
+        .expect("seed failed");
+}
+
+const UI_SCHEMA: &str = "DROP SCHEMA IF EXISTS it_ui CASCADE;
+    CREATE SCHEMA it_ui;
+    CREATE TABLE it_ui.customers (id serial PRIMARY KEY, name text NOT NULL);
+    CREATE TABLE it_ui.orders (
+      id serial PRIMARY KEY,
+      customer_id int NOT NULL REFERENCES it_ui.customers (id),
+      placed_at timestamptz);
+    CREATE TABLE it_ui.notes (body text);";
+
+/// Expanding a schema loads its object names; expanding a table loads its
+/// columns and keys. The diagram of the schema joins the tables by their
+/// foreign keys.
+#[gpui_kit::test]
+async fn postgres_explorer_loads_on_expand_and_draws_the_diagram(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, explorer) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(session_of(cx, &ds).expect("connected"), UI_SCHEMA);
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+
+    let labels = settled_labels(cx, &explorer);
+    let schema = labels.iter().position(|l| l == "it_ui").expect("it_ui");
+    assert_ne!(
+        labels.get(schema + 1).map(String::as_str),
+        Some("tables"),
+        "not loaded before expanding"
+    );
+
+    explorer.update(cx, |e, cx| e.expand(&["it_ui"], cx));
+    let labels = settled_labels(cx, &explorer);
+    assert_eq!(
+        labels.get(schema + 1).map(String::as_str),
+        Some("tables"),
+        "{labels:?}"
+    );
+
+    explorer.update(cx, |e, cx| e.expand(&["it_ui", "tables"], cx));
+    explorer.update(cx, |e, cx| e.expand(&["it_ui", "tables", "orders"], cx));
+    let labels = settled_labels(cx, &explorer);
+    let orders = labels.iter().position(|l| l == "orders").expect("orders");
+    assert_eq!(
+        labels[orders + 1..orders + 6],
+        ["id", "customer_id", "placed_at", "foreign keys", "indexes"],
+        "{labels:?}"
+    );
+
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_ui".into(),
+        table: Some("orders".into()),
+    };
+    let (window, diagram) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|cx| ErDiagram::new(ds.clone(), node, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the diagram", |cx| {
+        diagram.read_with(cx, |d, _| d.loaded().is_some())
+    });
+    let (tables, lines) = diagram.read_with(cx, |d, _| d.loaded().unwrap());
+    assert_eq!(tables, ["customers", "notes", "orders"]);
+    assert_eq!(lines, 1);
+    assert_eq!(
+        diagram
+            .read_with(cx, |d, _| d.focused().map(str::to_owned))
+            .as_deref(),
+        Some("orders")
+    );
+    // Paints boxes and lines without panicking, and survives a reset.
+    click(cx, window, "erd-reset");
+    let zoom = |cx: &mut TestAppContext| diagram.read_with(cx, |d, _| d.zoom());
+    let fitted = zoom(cx);
+    assert!(fitted <= 1., "fit never magnifies: {fitted}");
+
+    click(cx, window, "erd-zoom-reset");
+    assert!((zoom(cx) - 1.).abs() < 1e-4);
+    click(cx, window, "erd-zoom-in");
+    assert!((zoom(cx) - 1.25).abs() < 1e-4, "{}", zoom(cx));
+    click(cx, window, "erd-zoom-out");
+    click(cx, window, "erd-zoom-out");
+    assert!((zoom(cx) - 0.8).abs() < 1e-4, "{}", zoom(cx));
+    click(cx, window, "erd-fit");
+    assert!((zoom(cx) - fitted).abs() < 1e-4);
+
+    click(cx, window, "erd-collapse-all");
+    assert_eq!(diagram.read_with(cx, |d, _| d.collapsed_count()), 3);
+    click(cx, window, "erd-collapse-all");
+    assert_eq!(diagram.read_with(cx, |d, _| d.collapsed_count()), 0);
+
+    // Right after a frame, a burst of moves waits for the next 60 fps slot
+    // instead of redrawing at once.
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    assert!(diagram.update(cx, |d, cx| d.drag_moves(50, cx)));
+    std::thread::sleep(Duration::from_millis(30));
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+}
+
+/// Memory benchmark over the Serie A sample (`samples/serie_a.postgres.sql`
+/// loaded). Prints resident memory after each step:
+/// `SAVOIA_PG_URL=… cargo test -p savoia-app --release memory_benchmark -- --ignored --nocapture`
+/// The test platform draws nothing, so GPU-side memory of the real app isn't included.
+#[gpui_kit::test]
+#[ignore = "benchmark; run by hand"]
+async fn memory_benchmark(cx: &mut TestAppContext) {
+    use crate::memory::{format_bytes, resident_bytes};
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let mut rows: Vec<(&str, u64, Duration)> = Vec::new();
+    let mut step = |name, started: std::time::Instant| {
+        rows.push((name, resident_bytes().unwrap_or(0), started.elapsed()));
+    };
+
+    let t = std::time::Instant::now();
+    step("start", t);
+    let (ds, console, window) = console_on(cx, &url);
+    step("connected, explorer open", t);
+
+    let t = std::time::Instant::now();
+    run(cx, window, &console, "SELECT * FROM serie_a.match_events");
+    wait_until(cx, "the pause", |cx| paused(cx, &console));
+    click(cx, window, "load-all");
+    idle(cx, &console);
+    assert_eq!(
+        grid(cx, &console).0,
+        150_000,
+        "load samples/serie_a.postgres.sql first"
+    );
+    step("150,000 rows x 6 columns in the grid", t);
+
+    let t = std::time::Instant::now();
+    run(cx, window, &console, "SELECT 1");
+    idle(cx, &console);
+    step("result replaced by SELECT 1", t);
+
+    let t = std::time::Instant::now();
+    let node = NodeRef {
+        connection: ds.read_with(cx, |ds, _| ds.connections()[0].id),
+        database: "savoia".into(),
+        schema: "serie_a".into(),
+        table: None,
+    };
+    let (erd_window, diagram) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|cx| ErDiagram::new(ds.clone(), node, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the diagram", |cx| {
+        diagram.read_with(cx, |d, _| d.loaded().is_some())
+    });
+    for _ in 0..3 {
+        cx.update_window(erd_window, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+    }
+    step("serie_a ER diagram (14 tables) drawn", t);
+
+    println!("\n| Step | Resident memory | Δ | Took |\n| --- | --- | --- | --- |");
+    let mut last = rows[0].1;
+    for (name, bytes, took) in &rows {
+        let delta = *bytes as i64 - last as i64;
+        println!(
+            "| {name} | {} | {}{} | {} ms |",
+            format_bytes(*bytes),
+            if delta < 0 { "-" } else { "+" },
+            format_bytes(delta.unsigned_abs()),
+            took.as_millis()
+        );
+        last = *bytes;
+    }
 }

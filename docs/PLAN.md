@@ -32,7 +32,7 @@ savoia-db/
 │  ├─ savoia-mysql/           # mysql_async impl + MySQL catalog queries
 │  ├─ savoia-tunnel/          # SSH tunnel (russh) → local port forward
 │  ├─ savoia-transfer/        # DumpEngine/ImportEngine: external CLI runner + built-in exporter
-│  └─ savoia-store/           # app SQLite (connections, history, settings) + keyring secrets
+│  └─ savoia-store/           # app SQLite (connections, history, settings) + secrets file (0600)
 └─ docs/                      # PLAN.md, adr/
 ```
 
@@ -60,7 +60,7 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 ### M1: Connections (weeks 2–3) ✅
 - `savoia-core`: `ConnectionConfig` (SSL modes, SSH, read-only, color), URL import, `Driver`/`Connection` traits, catalog model, typed errors.
 - `savoia-pg` (tokio-postgres + rustls) and `savoia-mysql` (mysql_async + rustls): connect/test, TLS disable/prefer/require/verify-full, read-only sessions, catalog (databases, schemas, tables, views, functions, sequences).
-- `savoia-store`: SQLite (migrations via `user_version`) for connections and recents; secrets in the OS keychain, or in memory when not saved.
+- `savoia-store`: SQLite (migrations via `user_version`) for connections and recents; secrets in a user-only `0600` file, or in memory when not saved.
 - `savoia-tunnel` (russh): password, private-key and agent auth; known_hosts verification with explicit trust; concurrent forwarded sessions.
 - UI: connection dialog (URL import, Test, Save, Save & Connect, color), explorer of real catalogs (double-click to connect, context menu, auto-open of the default schema), host-trust prompt, error notifications, live status bar.
 - Tests: unit tests, live suites against Docker (Postgres with TLS, MySQL, SSH bastion), and headless UI tests driving the real form and explorer. CI runs the live suites.
@@ -111,6 +111,5 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 ## 6. Open decisions (need ADRs)
 
 - Bundle pg_dump/mysqldump binaries per OS, or only detect them?
-- Linux keyring fallback when no Secret Service is present.
 - Packaging/updater tool now that Tauri is gone.
 - App naming, license, and update/distribution channel.

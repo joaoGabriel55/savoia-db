@@ -50,7 +50,7 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Use Tauri v2 with a web frontend for the desktop shell](./202610091006-use-tauri-v2-with-web-frontend-for-desktop-shell.md) | Superseded by [Use GPUI Kit for a native, GPU-rendered UI](./202610091042-use-gpui-kit-for-a-native-gpu-rendered-ui.md) |
 | 2026-10-09 | [Use native dump tools when available, with a built-in Rust fallback](./202610091007-use-native-dump-tools-with-built-in-rust-fallback.md) | Accepted |
 | 2026-10-09 | [Use native async drivers behind a `Driver` trait](./202610091008-use-native-async-drivers-behind-a-driver-trait.md) | Accepted |
-| 2026-10-09 | [Store connection secrets in the OS keychain](./202610091009-store-connection-secrets-in-os-keychain.md) | Accepted |
+| 2026-10-09 | [Store connection secrets in the OS keychain](./202610091009-store-connection-secrets-in-os-keychain.md) | Superseded by [Store connection secrets in a user-only file](./202610091454-store-connection-secrets-in-a-user-only-file.md) |
 | 2026-10-09 | [Use Svelte 5 and TypeScript for the frontend](./202610091010-use-svelte-5-and-typescript-for-the-frontend.md) | Rejected |
 | 2026-10-09 | [Use GPUI Kit for a native, GPU-rendered UI](./202610091042-use-gpui-kit-for-a-native-gpu-rendered-ui.md) | Accepted |
 | 2026-10-09 | [Follow a DataGrip-style IDE layout with Savoia branding](./202610091043-follow-a-datagrip-style-ide-layout-with-savoia-branding.md) | Superseded by [Brand Savoia with Olivetti-style green fields and a red Run action](./202610091120-brand-savoia-with-olivetti-style-green-fields-and-a-red-run-action.md) |
@@ -59,3 +59,6 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Use Savoy blue, not red, as the brand accent](./202610091125-use-savoy-blue-not-red-as-the-brand-accent.md) | Accepted |
 | 2026-10-09 | [Stream query results as server-rendered text pages](./202610091303-stream-query-results-as-server-rendered-text-pages.md) | Accepted |
 | 2026-10-09 | [Serialize all work on one connection per session](./202610091309-serialize-all-work-on-one-connection-per-session.md) | Accepted |
+| 2026-10-09 | [Load schema objects and table details on demand](./202610091437-load-schema-objects-and-table-details-on-demand.md) | Proposed |
+| 2026-10-09 | [Draw ER diagrams natively with a built-in layered layout](./202610091437-draw-er-diagrams-natively-with-a-built-in-layered-layout.md) | Proposed |
+| 2026-10-09 | [Store connection secrets in a user-only file](./202610091454-store-connection-secrets-in-a-user-only-file.md) | Accepted |

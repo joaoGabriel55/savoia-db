@@ -30,6 +30,10 @@ const SAVOY_BLUE_HOVER: u32 = 0x2B74C7;
 const SAVOY_BLUE_PRESSED: u32 = 0x1A5498;
 const SAVOY_INK: u32 = 0xFFFFFF;
 
+/// The ER diagram's board: a blueprint in deep Ivrea green (blue is Run's
+/// alone), ruled with band ink at low opacity.
+pub const BLUEPRINT: u32 = 0x10372A;
+
 /// Text on an Ivrea band, and secondary text on it (tinted from the green).
 pub const BAND_INK: u32 = 0xF2EFE8;
 pub const BAND_INK_MUTED: u32 = 0xB5D0C2;

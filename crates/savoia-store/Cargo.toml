@@ -1,6 +1,6 @@
 [package]
 name = "savoia-store"
-description = "Local persistence for Savoia DB: saved connections (SQLite) and secrets (OS keychain)."
+description = "Local persistence for Savoia DB: saved connections (SQLite) and secrets (a user-only file)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,6 @@ license.workspace = true
 savoia-core.workspace = true
 serde_json.workspace = true
 rusqlite = { version = "0.40", features = ["bundled"] }
-keyring = "4.2"
 dirs = "6"
 
 [lints]

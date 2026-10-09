@@ -140,7 +140,7 @@ pub struct ConnectionConfig {
     pub ssl: SslMode,
     pub ssh: Option<SshConfig>,
     pub read_only: bool,
-    /// Whether passwords are kept in the OS keychain.
+    /// Whether passwords are saved in the user-only secrets file.
     pub save_password: bool,
 }
 

@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use savoia_core::{AppError, AppResult, ConnectionConfig, ConnectionId, Secrets};
-use savoia_store::{ConnectionStore, KeychainSecrets, MemorySecrets, SecretStore};
+use savoia_store::{ConnectionStore, FileSecrets, MemorySecrets, SecretStore};
 use savoia_tunnel::HostKeyPolicy;
 
 use crate::runtime;
@@ -41,6 +41,47 @@ impl Drop for Refresh {
     }
 }
 
+/// Part of a connected source's catalog that loads when its tree node opens.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LoadTarget {
+    Objects {
+        database: String,
+        schema: String,
+    },
+    Table {
+        database: String,
+        schema: String,
+        table: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoadState {
+    /// A query holds the session's gate; the load runs once it ends.
+    Waiting,
+    Loading,
+    /// Kept until the next Refresh, so a failing node doesn't retry in a loop.
+    Failed(String),
+}
+
+struct Load {
+    state: LoadState,
+    /// `None` once finished. Dropping it abandons the load.
+    _io: Option<Io>,
+}
+
+/// An I/O task and the UI task awaiting it; dropping it aborts both.
+struct Io {
+    io: tokio::task::AbortHandle,
+    _task: Task<()>,
+}
+
+impl Drop for Io {
+    fn drop(&mut self) {
+        self.io.abort();
+    }
+}
+
 pub enum DataSourcesEvent {
     /// The list or a connection state changed.
     Changed,
@@ -56,14 +97,16 @@ pub enum DataSourcesEvent {
 
 pub struct DataSources {
     store: Option<ConnectionStore>,
-    /// Saved secrets: the OS keychain, or memory when no keychain is available.
+    /// Saved secrets: the user-only secrets file, or memory when there is no
+    /// data directory.
     saved_secrets: Arc<dyn SecretStore>,
     /// Secrets entered this session (always populated on save), so connecting
-    /// doesn't depend on a keychain round trip or on "save password".
+    /// doesn't depend on a file read or on "save password".
     session_secrets: Arc<MemorySecrets>,
     connections: Vec<ConnectionConfig>,
     states: HashMap<ConnectionId, SourceState>,
     refreshes: HashMap<ConnectionId, Refresh>,
+    loads: HashMap<(ConnectionId, LoadTarget), Load>,
     /// Shown in the explorer when local storage can't be opened.
     pub storage_error: Option<String>,
 }
@@ -71,12 +114,11 @@ pub struct DataSources {
 impl EventEmitter<DataSourcesEvent> for DataSources {}
 
 impl DataSources {
-    /// Uses the app's SQLite file and the OS keychain.
+    /// Uses the app's SQLite file and secrets file.
     pub fn new(_: &mut Context<Self>) -> Self {
-        let saved_secrets: Arc<dyn SecretStore> = if KeychainSecrets::available() {
-            Arc::new(KeychainSecrets)
-        } else {
-            Arc::new(MemorySecrets::default())
+        let saved_secrets: Arc<dyn SecretStore> = match FileSecrets::open_default() {
+            Ok(file) => Arc::new(file),
+            Err(_) => Arc::new(MemorySecrets::default()),
         };
         Self::with_stores(ConnectionStore::open_default(), saved_secrets)
     }
@@ -96,6 +138,7 @@ impl DataSources {
             connections: Vec::new(),
             states: HashMap::new(),
             refreshes: HashMap::new(),
+            loads: HashMap::new(),
             storage_error,
         };
         this.reload();
@@ -124,6 +167,96 @@ impl DataSources {
 
     pub fn refresh_state(&self, id: ConnectionId) -> Option<RefreshState> {
         self.refreshes.get(&id).map(|r| r.state)
+    }
+
+    pub fn session(&self, id: ConnectionId) -> Option<Arc<Session>> {
+        match self.state(id) {
+            SourceState::Connected(session) => Some(session.clone()),
+            _ => None,
+        }
+    }
+
+    /// `None` when not loading and not failed: loaded, or never asked for.
+    pub fn load_state(&self, id: ConnectionId, target: &LoadTarget) -> Option<&LoadState> {
+        self.loads.get(&(id, target.clone())).map(|l| &l.state)
+    }
+
+    /// Loads part of a connected source's catalog into its session, after
+    /// any running query. Does nothing if that load is running or failed.
+    pub fn load(&mut self, id: ConnectionId, target: LoadTarget, cx: &mut Context<Self>) {
+        let key = (id, target.clone());
+        if self.loads.contains_key(&key) || self.refreshes.contains_key(&id) {
+            return;
+        }
+        let Some(session) = self.session(id) else {
+            return;
+        };
+        let state = if session.is_busy() {
+            LoadState::Waiting
+        } else {
+            LoadState::Loading
+        };
+        let io = runtime::spawn(async move {
+            match target {
+                LoadTarget::Objects { database, schema } => {
+                    session.load_objects(&database, &schema).await
+                }
+                LoadTarget::Table {
+                    database,
+                    schema,
+                    table,
+                } => session
+                    .describe_table(&database, &schema, &table)
+                    .await
+                    .map(drop),
+            }
+        });
+        let abort = io.abort_handle();
+        let task = cx.spawn({
+            let key = key.clone();
+            async move |this, cx| {
+                let result = session::join(io).await;
+                this.update(cx, |this, cx| this.finish_load(key, result, cx))
+                    .ok();
+            }
+        });
+        self.loads.insert(
+            key,
+            Load {
+                state,
+                _io: Some(Io {
+                    io: abort,
+                    _task: task,
+                }),
+            },
+        );
+        cx.emit(DataSourcesEvent::Changed);
+    }
+
+    fn finish_load(
+        &mut self,
+        key: (ConnectionId, LoadTarget),
+        result: AppResult<()>,
+        cx: &mut Context<Self>,
+    ) {
+        // Abandoned (refreshed, disconnected or reconnected) while it ran.
+        let Some(load) = self.loads.get_mut(&key) else {
+            return;
+        };
+        match result {
+            Ok(()) => {
+                self.loads.remove(&key);
+            }
+            Err(err) => {
+                load.state = LoadState::Failed(err.to_string());
+                load._io = None;
+            }
+        }
+        cx.emit(DataSourcesEvent::Changed);
+    }
+
+    fn forget_loads(&mut self, id: ConnectionId) {
+        self.loads.retain(|(source, _), _| *source != id);
     }
 
     /// Loads the secrets for `id` off the UI thread: this session's first,
@@ -186,6 +319,7 @@ impl DataSources {
     /// runtime (pools and SSH handles may need it while shutting down).
     fn set_state(&mut self, id: ConnectionId, state: SourceState) {
         self.refreshes.remove(&id);
+        self.forget_loads(id);
         if let Some(SourceState::Connected(session)) = self.states.insert(id, state) {
             drop(runtime::spawn(async move { drop(session) }));
         }
@@ -278,6 +412,8 @@ impl DataSources {
             RefreshState::Loading
         };
         let session = session.clone();
+        // The reload brings back loaded object names; failed loads get retried.
+        self.forget_loads(id);
         let io = runtime::spawn(async move { session.reload_catalog().await });
         let abort = io.abort_handle();
         let task = cx.spawn(async move |this, cx| {

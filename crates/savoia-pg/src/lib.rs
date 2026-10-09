@@ -1,5 +1,6 @@
 //! PostgreSQL driver built on `tokio-postgres`. Must run inside a Tokio runtime.
 
+mod catalog;
 mod execute;
 mod tls;
 
@@ -9,14 +10,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use savoia_core::{
     AppError, AppResult, Catalog, Connection, DatabaseNode, Driver, Endpoint, Engine, QueryHandle,
-    SchemaNode, SchemaObjects, Secrets, ServerInfo, SslMode,
+    SchemaObjects, Secrets, ServerInfo, SslMode, TableInfo,
 };
 use tokio::task::JoinHandle;
 use tokio_postgres::{Client, Config, NoTls, config::SslMode as PgSslMode, error::SqlState};
 
+/// What Postgres clients connect to when no database is given.
+const DEFAULT_DATABASE: &str = "postgres";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const SYSTEM_SCHEMA_FILTER: &str =
-    "n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'";
 
 pub struct PgDriver;
 
@@ -45,6 +46,10 @@ impl Driver for PgDriver {
         };
         Ok(Box::new(PgConnection {
             client,
+            database: endpoint
+                .database
+                .clone()
+                .unwrap_or_else(|| DEFAULT_DATABASE.into()),
             ssl: endpoint.ssl,
             task,
         }))
@@ -65,7 +70,7 @@ fn pg_config(endpoint: &Endpoint, secrets: &Secrets) -> AppResult<Config> {
     config
         .port(endpoint.port)
         .user(&endpoint.user)
-        .dbname(endpoint.database.as_deref().unwrap_or("postgres"))
+        .dbname(endpoint.database.as_deref().unwrap_or(DEFAULT_DATABASE))
         .application_name("Savoia DB")
         .connect_timeout(CONNECT_TIMEOUT)
         .ssl_mode(match endpoint.ssl {
@@ -116,6 +121,8 @@ fn query_error(err: tokio_postgres::Error) -> AppError {
 
 pub struct PgConnection {
     client: Client,
+    /// The one database this session can read the catalog of.
+    database: String,
     /// How the session connected; cancel requests connect the same way.
     ssl: SslMode,
     task: JoinHandle<()>,
@@ -127,12 +134,16 @@ impl PgConnection {
         Ok(rows.iter().map(|r| r.get(0)).collect())
     }
 
-    async fn pairs(&self, sql: &str) -> AppResult<Vec<(String, String, String)>> {
-        let rows = self.client.query(sql, &[]).await.map_err(query_error)?;
-        Ok(rows
-            .iter()
-            .map(|r| (r.get(0), r.get(1), r.get(2)))
-            .collect())
+    /// Fails for databases other than the connected one: their catalogs
+    /// need a session of their own.
+    fn check_database(&self, database: &str) -> AppResult<()> {
+        if database == self.database {
+            Ok(())
+        } else {
+            Err(AppError::query(format!(
+                "\"{database}\" can only be browsed from a connection to it"
+            )))
+        }
     }
 }
 
@@ -152,63 +163,14 @@ impl Connection for PgConnection {
 
     async fn catalog(&self) -> AppResult<Catalog> {
         let server = self.server_info().await?;
-        let current: String = self
-            .client
-            .query_one("SELECT current_database()", &[])
-            .await
-            .map_err(query_error)?
-            .get(0);
         let databases = self
             .strings("SELECT datname FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY 1")
             .await?;
-        let schema_names = self
-            .strings(&format!(
-                "SELECT n.nspname FROM pg_namespace n WHERE {SYSTEM_SCHEMA_FILTER} ORDER BY 1"
-            ))
-            .await?;
-        let relations = self
-            .pairs(&format!(
-                "SELECT n.nspname, c.relname, c.relkind::text FROM pg_class c \
-                 JOIN pg_namespace n ON n.oid = c.relnamespace \
-                 WHERE c.relkind IN ('r','p','v','m','S','f') AND NOT c.relispartition AND {SYSTEM_SCHEMA_FILTER} \
-                 ORDER BY 1, 2"
-            ))
-            .await?;
-        let functions = self
-            .pairs(&format!(
-                "SELECT DISTINCT n.nspname, p.proname, '' FROM pg_proc p \
-                 JOIN pg_namespace n ON n.oid = p.pronamespace \
-                 WHERE p.prokind IN ('f','p') AND {SYSTEM_SCHEMA_FILTER} ORDER BY 1, 2"
-            ))
-            .await?;
-
-        let mut schemas: Vec<SchemaNode> = schema_names
-            .into_iter()
-            .map(|name| SchemaNode {
-                name,
-                objects: SchemaObjects::default(),
-            })
-            .collect();
-        for (schema, name, kind) in relations {
-            if let Some(objects) = objects_of(&mut schemas, &schema) {
-                match kind.as_str() {
-                    "r" | "p" | "f" => objects.tables.push(name),
-                    "v" | "m" => objects.views.push(name),
-                    "S" => objects.sequences.push(name),
-                    _ => {}
-                }
-            }
-        }
-        for (schema, name, _) in functions {
-            if let Some(objects) = objects_of(&mut schemas, &schema) {
-                objects.functions.push(name);
-            }
-        }
-
+        let mut schemas = catalog::schemas(&self.client).await?;
         let databases = databases
             .into_iter()
             .map(|name| {
-                let is_current = name == current;
+                let is_current = name == self.database;
                 DatabaseNode {
                     schemas: if is_current {
                         std::mem::take(&mut schemas)
@@ -223,6 +185,27 @@ impl Connection for PgConnection {
         Ok(Catalog { server, databases })
     }
 
+    async fn list_objects(&self, database: &str, schema: &str) -> AppResult<SchemaObjects> {
+        self.check_database(database)?;
+        catalog::objects(&self.client, schema).await
+    }
+
+    async fn describe_table(
+        &self,
+        database: &str,
+        schema: &str,
+        table: &str,
+    ) -> AppResult<TableInfo> {
+        self.check_database(database)?;
+        let mut tables = catalog::describe(&self.client, schema, Some(table)).await?;
+        Ok(tables.remove(0))
+    }
+
+    async fn describe_schema(&self, database: &str, schema: &str) -> AppResult<Vec<TableInfo>> {
+        self.check_database(database)?;
+        catalog::describe(&self.client, schema, None).await
+    }
+
     async fn execute(&self, sql: String) -> AppResult<QueryHandle> {
         execute::execute(&self.client, self.ssl, sql).await
     }
@@ -230,13 +213,6 @@ impl Connection for PgConnection {
     async fn close(&self) {
         self.task.abort();
     }
-}
-
-fn objects_of<'a>(schemas: &'a mut [SchemaNode], schema: &str) -> Option<&'a mut SchemaObjects> {
-    schemas
-        .iter_mut()
-        .find(|s| s.name == schema)
-        .map(|s| &mut s.objects)
 }
 
 impl Drop for PgConnection {

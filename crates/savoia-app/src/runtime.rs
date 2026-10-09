@@ -1,4 +1,4 @@
-//! The Tokio runtime that drivers, tunnels and the keychain run on. GPUI has
+//! The Tokio runtime that drivers, tunnels and secret storage run on. GPUI has
 //! its own executor; views `await` the `JoinHandle`s returned here from
 //! `cx.spawn`, so database I/O never runs on the UI thread.
 

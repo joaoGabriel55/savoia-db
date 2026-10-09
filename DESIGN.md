@@ -14,6 +14,7 @@ colors:
   band-ink-muted: "#B5D0C2"
   band-ink-disabled: "#8FAF9F"
   band-rule: "#2F7458"
+  blueprint: "#10372A"
   graphite-canvas: "#161A17"
   graphite-panel: "#1D211E"
   graphite-seam: "#111412"
@@ -154,6 +155,7 @@ Deep brand hues on a green-cast graphite, with bright status hues that belong to
 ### Primary
 - **Ivrea Green** (`ivrea-green`): the primary brand color. Fills the explorer and console tool bands, primary buttons (such as "New data source"), and the title-bar mark tile. Hover lifts to `ivrea-green-hover`, press sinks to `ivrea-green-pressed`.
 - **Ivrea Line** (`ivrea-line`): the same green lifted for strokes on graphite. Focus ring, text caret, the active result-grid cell border, and the active result tab underline.
+- **Blueprint** (`blueprint`): the ER diagram's board, a blueprint drawn in deep Ivrea green rather than blue (the Run-Only Blue Rule). A `band-ink` grid rules it: minor lines every 20 diagram units at 7% opacity, major every 100 at 16%. Relationship lines use `band-ink-muted`.
 
 ### Secondary
 - **Azzurro Savoia** (`savoy-blue`): the House of Savoy's blue, with white ink (`savoy-ink`). It fills the Run button and nothing else. Hover `savoy-blue-hover`, press `savoy-blue-pressed`.

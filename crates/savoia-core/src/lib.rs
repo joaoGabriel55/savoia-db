@@ -8,7 +8,10 @@ mod engine;
 mod error;
 mod query;
 
-pub use catalog::{Catalog, DatabaseNode, SchemaNode, SchemaObjects, ServerInfo};
+pub use catalog::{
+    Catalog, ColumnInfo, DatabaseNode, ForeignKey, IndexInfo, ObjectCounts, SchemaNode,
+    SchemaObjects, ServerInfo, TableInfo, TableKind, attach,
+};
 pub use connection::{
     ConnectionColor, ConnectionConfig, ConnectionId, Endpoint, Secrets, SshAuth, SshConfig,
     SslMode, parse_url,

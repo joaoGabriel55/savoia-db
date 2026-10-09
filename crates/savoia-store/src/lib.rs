@@ -1,7 +1,8 @@
-//! Local persistence: saved connections in SQLite, secrets in the OS keychain.
-//! See ADR "Store connection secrets in the OS keychain".
+//! Local persistence: saved connections in SQLite, secrets in a file only the
+//! user can read. See ADR "Store connection secrets in a user-only file".
 
 use std::collections::HashMap;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -133,9 +134,13 @@ impl ConnectionStore {
     }
 }
 
-fn default_path() -> AppResult<PathBuf> {
+fn data_dir() -> AppResult<PathBuf> {
     let dir = dirs::data_dir().ok_or_else(|| AppError::storage("no user data directory"))?;
-    Ok(dir.join("savoia-db").join("savoia.sqlite"))
+    Ok(dir.join("savoia-db"))
+}
+
+fn default_path() -> AppResult<PathBuf> {
+    Ok(data_dir()?.join("savoia.sqlite"))
 }
 
 fn unix_millis(t: SystemTime) -> i64 {
@@ -152,10 +157,14 @@ pub trait SecretStore: Send + Sync {
     }
 }
 
-/// The OS credential store (macOS Keychain, Windows Credential Manager, Secret Service).
-pub struct KeychainSecrets;
+/// Secrets in a JSON file readable only by the user (`0600`, like `~/.pgpass`),
+/// keyed by connection id.
+pub struct FileSecrets {
+    path: PathBuf,
+    /// One read-modify-write at a time within the process.
+    lock: Mutex<()>,
+}
 
-const SERVICE: &str = "dev.savoia.db";
 const FIELDS: [&str; 3] = ["password", "ssh-password", "ssh-key-passphrase"];
 
 fn fields(secrets: &mut Secrets) -> [&mut Option<String>; 3] {
@@ -166,43 +175,94 @@ fn fields(secrets: &mut Secrets) -> [&mut Option<String>; 3] {
     ]
 }
 
-impl KeychainSecrets {
-    /// Whether the platform credential store could be initialized.
-    pub fn available() -> bool {
-        keyring::Entry::store_status().is_ok()
+type SecretMap = serde_json::Map<String, serde_json::Value>;
+
+impl FileSecrets {
+    /// `<data dir>/savoia-db/secrets.json`; created on the first save.
+    pub fn open_default() -> AppResult<Self> {
+        Ok(Self::at(data_dir()?.join("secrets.json")))
     }
 
-    fn entry(id: ConnectionId, field: &str) -> AppResult<keyring::Entry> {
-        keyring::Entry::new(SERVICE, &format!("{id}/{field}")).map_err(AppError::storage)
+    pub fn at(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            lock: Mutex::new(()),
+        }
+    }
+
+    fn read_all(&self) -> AppResult<SecretMap> {
+        match std::fs::read(&self.path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(AppError::storage),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(SecretMap::new()),
+            Err(err) => Err(AppError::storage(err)),
+        }
+    }
+
+    /// Replaces the file through a temporary one, so it is never half written.
+    fn write_all(&self, map: &SecretMap) -> AppResult<()> {
+        let dir = self
+            .path
+            .parent()
+            .ok_or_else(|| AppError::storage("secrets file has no directory"))?;
+        std::fs::create_dir_all(dir).map_err(AppError::storage)?;
+        restrict(dir, 0o700)?;
+        let tmp = self.path.with_extension("json.tmp");
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut file = options.open(&tmp).map_err(AppError::storage)?;
+        // An old temporary file keeps its mode; make sure of it.
+        restrict(&tmp, 0o600)?;
+        let json = serde_json::to_vec_pretty(map).map_err(AppError::storage)?;
+        file.write_all(&json).map_err(AppError::storage)?;
+        file.sync_all().map_err(AppError::storage)?;
+        std::fs::rename(&tmp, &self.path).map_err(AppError::storage)
     }
 }
 
-impl SecretStore for KeychainSecrets {
+/// Sets Unix permission bits; does nothing elsewhere.
+fn restrict(path: &Path, mode: u32) -> AppResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .map_err(AppError::storage)?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, mode);
+    Ok(())
+}
+
+impl SecretStore for FileSecrets {
     fn load(&self, id: ConnectionId) -> AppResult<Secrets> {
+        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let map = self.read_all()?;
         let mut secrets = Secrets::default();
-        for (field, slot) in FIELDS.into_iter().zip(fields(&mut secrets)) {
-            *slot = match Self::entry(id, field)?.get_password() {
-                Ok(value) => Some(value),
-                Err(keyring::Error::NoEntry) => None,
-                Err(err) => return Err(AppError::storage(err)),
-            };
+        if let Some(entry) = map.get(&id.to_string()) {
+            for (field, slot) in FIELDS.into_iter().zip(fields(&mut secrets)) {
+                *slot = entry.get(field).and_then(|v| v.as_str()).map(str::to_owned);
+            }
         }
         Ok(secrets)
     }
 
     fn save(&self, id: ConnectionId, secrets: &Secrets) -> AppResult<()> {
+        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = self.read_all()?;
         let mut secrets = secrets.clone();
-        for (field, slot) in FIELDS.into_iter().zip(fields(&mut secrets)) {
-            let entry = Self::entry(id, field)?;
-            match slot {
-                Some(value) => entry.set_password(value).map_err(AppError::storage)?,
-                None => match entry.delete_credential() {
-                    Ok(()) | Err(keyring::Error::NoEntry) => {}
-                    Err(err) => return Err(AppError::storage(err)),
-                },
-            }
-        }
-        Ok(())
+        let entry: SecretMap = FIELDS
+            .into_iter()
+            .zip(fields(&mut secrets))
+            .filter_map(|(field, slot)| Some((field.to_owned(), slot.take()?.into())))
+            .collect();
+        let had = if entry.is_empty() {
+            map.remove(&id.to_string()).is_some()
+        } else {
+            map.insert(id.to_string(), entry.into());
+            true
+        };
+        if had { self.write_all(&map) } else { Ok(()) }
     }
 }
 
@@ -313,19 +373,43 @@ mod tests {
         assert_eq!(store.load(id).unwrap(), Secrets::default());
     }
 
-    /// Touches the real OS keychain; run manually with `--ignored`.
     #[test]
-    #[ignore]
-    fn keychain_roundtrip() {
-        let id = ConnectionId::new();
+    fn file_secrets_roundtrip_private_to_the_user() {
+        let dir = std::env::temp_dir().join(format!("savoia-secrets-{}", ConnectionId::new()));
+        let path = dir.join("secrets.json");
+        let store = FileSecrets::at(&path);
+        let (a, b) = (ConnectionId::new(), ConnectionId::new());
+        assert_eq!(store.load(a).unwrap(), Secrets::default(), "no file yet");
+
         let secrets = Secrets {
             password: Some("pw".into()),
             ssh_password: None,
             ssh_key_passphrase: Some("kp".into()),
         };
-        KeychainSecrets.save(id, &secrets).unwrap();
-        assert_eq!(KeychainSecrets.load(id).unwrap(), secrets);
-        KeychainSecrets.delete(id).unwrap();
-        assert_eq!(KeychainSecrets.load(id).unwrap(), Secrets::default());
+        store.save(a, &secrets).unwrap();
+        store
+            .save(
+                b,
+                &Secrets {
+                    password: Some("other".into()),
+                    ..Secrets::default()
+                },
+            )
+            .unwrap();
+        // A fresh instance reads what the first one wrote.
+        assert_eq!(FileSecrets::at(&path).load(a).unwrap(), secrets);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&path), 0o600);
+            assert_eq!(mode(&dir), 0o700);
+        }
+
+        store.delete(a).unwrap();
+        assert_eq!(store.load(a).unwrap(), Secrets::default());
+        assert_eq!(store.load(b).unwrap().password.as_deref(), Some("other"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
