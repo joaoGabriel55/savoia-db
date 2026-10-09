@@ -23,14 +23,24 @@ use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
 use crate::memory::MemoryMeter;
 use crate::theme;
 
+actions!(workspace, [NewConsole]);
+
+pub fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("secondary-t", NewConsole, None)]);
+}
+
+/// A tab of the main area, in opening order.
+enum Page {
+    Console(Entity<QueryConsole>),
+    Diagram(Entity<ErDiagram>),
+}
+
 pub struct Workspace {
     data_sources: Entity<DataSources>,
     explorer: Entity<Explorer>,
-    console: Entity<QueryConsole>,
-    /// Tabs after the console's.
-    diagrams: Vec<Entity<ErDiagram>>,
-    /// 0 is the console, then `diagrams`.
-    active_tab: usize,
+    pages: Vec<Page>,
+    /// Index into `pages`; meaningless while it's empty.
+    active: usize,
     memory: Entity<MemoryMeter>,
     _subscriptions: Vec<Subscription>,
 }
@@ -38,6 +48,14 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let data_sources = crate::data_sources::init(cx);
+        Self::with_data_sources(data_sources, window, cx)
+    }
+
+    pub fn with_data_sources(
+        data_sources: Entity<DataSources>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let explorer = cx.new(|cx| Explorer::new(data_sources.clone(), cx));
         let subscriptions = vec![
             cx.observe(&explorer, |_, _, cx| cx.notify()),
@@ -45,45 +63,125 @@ impl Workspace {
             cx.subscribe_in(&data_sources, window, Self::on_data_source_event),
             cx.subscribe_in(&explorer, window, Self::on_explorer_event),
         ];
-        let console =
-            cx.new(|cx| QueryConsole::new(data_sources.clone(), explorer.clone(), window, cx));
-        Self {
-            console,
-            diagrams: Vec::new(),
-            active_tab: 0,
+        let mut this = Self {
+            pages: Vec::new(),
+            active: 0,
             memory: cx.new(MemoryMeter::new),
             data_sources,
             explorer,
             _subscriptions: subscriptions,
+        };
+        // The first console follows the explorer's selection until it runs.
+        this.open_console(None, window, cx);
+        this
+    }
+
+    /// Opens a console tab on `source` and brings it forward.
+    pub fn open_console(
+        &mut self,
+        source: Option<ConnectionId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<QueryConsole> {
+        let (data_sources, explorer) = (self.data_sources.clone(), self.explorer.clone());
+        let console = cx.new(|cx| QueryConsole::new(data_sources, explorer, source, window, cx));
+        cx.observe(&console, |_, _, cx| cx.notify()).detach();
+        self.pages.push(Page::Console(console.clone()));
+        self.active = self.pages.len() - 1;
+        cx.notify();
+        console
+    }
+
+    pub fn new_console(&mut self, _: &NewConsole, window: &mut Window, cx: &mut Context<Self>) {
+        let source = self.explorer.read(cx).selected_connection(cx);
+        self.open_console(source, window, cx);
+    }
+
+    /// Closes a tab, cancelling its console's running query.
+    pub fn close(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.pages.len() {
+            return;
+        }
+        // Cancel now: the last frame may keep the view alive a little longer.
+        if let Page::Console(console) = self.pages.remove(index) {
+            console.update(cx, |console, cx| console.cancel(cx));
+        }
+        if self.active > index || self.active == self.pages.len() {
+            self.active = self.active.saturating_sub(1);
+        }
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn explorer(&self) -> &Entity<Explorer> {
+        &self.explorer
+    }
+
+    #[cfg(test)]
+    pub fn consoles(&self) -> impl Iterator<Item = &Entity<QueryConsole>> {
+        self.pages.iter().filter_map(|page| match page {
+            Page::Console(console) => Some(console),
+            Page::Diagram(_) => None,
+        })
+    }
+
+    fn active_console(&self) -> Option<&Entity<QueryConsole>> {
+        match self.pages.get(self.active) {
+            Some(Page::Console(console)) => Some(console),
+            _ => None,
+        }
+    }
+
+    /// Where SQL for `source` goes: the active console if it runs there (or
+    /// isn't bound yet), else the last console on `source`, else a new one.
+    fn console_for(
+        &mut self,
+        source: ConnectionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<QueryConsole> {
+        let fits = |console: &Entity<QueryConsole>, cx: &App| {
+            let console = console.read(cx);
+            !console.is_bound() || console.source(cx) == Some(source)
+        };
+        if let Some(console) = self.active_console().filter(|c| fits(c, cx)) {
+            return console.clone();
+        }
+        let found = self.pages.iter().rposition(|page| match page {
+            Page::Console(console) => console.read(cx).source(cx) == Some(source),
+            Page::Diagram(_) => false,
+        });
+        match found {
+            Some(index) => {
+                self.active = index;
+                match &self.pages[index] {
+                    Page::Console(console) => console.clone(),
+                    Page::Diagram(_) => unreachable!(),
+                }
+            }
+            None => self.open_console(Some(source), window, cx),
         }
     }
 
     /// Opens the diagram of `node`'s schema, or brings its tab forward.
     fn show_diagram(&mut self, node: NodeRef, cx: &mut Context<Self>) {
-        let open = self.diagrams.iter().position(|d| d.read(cx).shows(&node));
-        let index = match open {
+        let open = self.pages.iter().position(|page| match page {
+            Page::Diagram(d) => d.read(cx).shows(&node),
+            Page::Console(_) => false,
+        });
+        match open {
             Some(i) => {
-                self.diagrams[i].update(cx, |d, cx| d.focus(node.table, cx));
-                i
+                if let Page::Diagram(diagram) = &self.pages[i] {
+                    diagram.update(cx, |d, cx| d.focus(node.table, cx));
+                }
+                self.active = i;
             }
             None => {
                 let data_sources = self.data_sources.clone();
-                self.diagrams
-                    .push(cx.new(|cx| ErDiagram::new(data_sources, node, cx)));
-                self.diagrams.len() - 1
+                let diagram = cx.new(|cx| ErDiagram::new(data_sources, node, cx));
+                self.pages.push(Page::Diagram(diagram));
+                self.active = self.pages.len() - 1;
             }
-        };
-        self.active_tab = index + 1;
-        cx.notify();
-    }
-
-    fn close_diagram(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.diagrams.len() {
-            return;
-        }
-        self.diagrams.remove(index);
-        if self.active_tab > index {
-            self.active_tab -= 1;
         }
         cx.notify();
     }
@@ -97,14 +195,19 @@ impl Workspace {
     ) {
         match event {
             ExplorerEvent::ShowDiagram(node) => self.show_diagram(node.clone(), cx),
-            ExplorerEvent::Sql { sql, run, refresh } => {
-                // The SQL lands in the console, so bring it forward.
-                self.active_tab = 0;
-                self.console
-                    .update(cx, |console, cx| console.insert_sql(sql, *run, window, cx));
+            ExplorerEvent::Sql {
+                connection,
+                sql,
+                run,
+                refresh,
+            } => {
+                // The SQL lands in a console on its data source; bring it forward.
+                let console = self.console_for(*connection, window, cx);
+                console.update(cx, |console, cx| console.insert_sql(sql, *run, window, cx));
                 // Queued behind the statement: refreshes wait for the running query.
-                if let Some(id) = refresh {
-                    self.data_sources.update(cx, |ds, cx| ds.refresh(*id, cx));
+                if *refresh {
+                    self.data_sources
+                        .update(cx, |ds, cx| ds.refresh(*connection, cx));
                 }
                 cx.notify();
             }
@@ -219,10 +322,6 @@ impl Render for Workspace {
             .selected_connection(cx)
             .and_then(|id| ds.get(id).cloned());
         let source_name = selected.as_ref().map(|c| c.display_name());
-        let source_color = selected
-            .as_ref()
-            .and_then(|c| c.color)
-            .map_or(muted, |c| rgb(c.rgb()).into());
         let (status_icon, status_text) = match selected.as_ref().map(|c| (c, ds.state(c.id))) {
             None => (Lucide::Plug, "No data source selected".to_string()),
             Some((c, SourceState::Disconnected)) => (
@@ -272,65 +371,99 @@ impl Render for Workspace {
                 ),
         );
 
-        // The connection color carries onto the console tab, like Beekeeper's
+        // The connection color carries onto console tabs, like Beekeeper's
         // colored connections, so prod vs local is visible at a glance.
-        let console_tab = Tab::new()
-            .label(match &source_name {
-                Some(name) => format!("console [{name}]"),
-                None => "console".to_string(),
-            })
-            .prefix(
-                Icon::new(Lucide::Database)
-                    .small()
-                    .ml_2()
-                    .text_color(source_color),
-            );
-
-        let diagram_tabs: Vec<Tab> = self
-            .diagrams
+        let mut seen: Vec<Option<ConnectionId>> = Vec::new();
+        let tabs: Vec<Tab> = self
+            .pages
             .iter()
             .enumerate()
-            .map(|(i, diagram)| {
-                Tab::new()
-                    .label(diagram.read(cx).title())
-                    .prefix(Icon::new(Lucide::Workflow).small().ml_2().text_color(muted))
-                    .suffix(
-                        Button::new(("close-diagram", i))
-                            .ghost()
-                            .xsmall()
-                            .mr_1()
-                            .icon(Icon::new(IconName::Close))
-                            .tooltip("Close")
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.close_diagram(i, cx);
-                            })),
-                    )
+            .map(|(i, page)| {
+                let tab = match page {
+                    Page::Console(console) => {
+                        let source = console.read(cx).source(cx);
+                        seen.push(source);
+                        let nth = seen.iter().filter(|s| **s == source).count();
+                        let config = source.and_then(|id| ds.get(id));
+                        let color = config
+                            .and_then(|c| c.color)
+                            .map_or(muted, |c| rgb(c.rgb()).into());
+                        let mut label = "console".to_string();
+                        if nth > 1 {
+                            label.push_str(&format!(" {nth}"));
+                        }
+                        if let Some(config) = config {
+                            label.push_str(&format!(" [{}]", config.display_name()));
+                        }
+                        Tab::new()
+                            .label(label)
+                            .prefix(Icon::new(Lucide::Database).small().ml_2().text_color(color))
+                    }
+                    Page::Diagram(diagram) => Tab::new()
+                        .label(diagram.read(cx).title())
+                        .prefix(Icon::new(Lucide::Workflow).small().ml_2().text_color(muted)),
+                };
+                tab.suffix(
+                    Button::new(("close-tab", i))
+                        .ghost()
+                        .xsmall()
+                        .mr_1()
+                        .icon(Icon::new(IconName::Close))
+                        .tooltip("Close")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.close(i, cx);
+                        })),
+                )
             })
             .collect();
         let workspace = cx.entity().downgrade();
-        let content = match self
-            .active_tab
-            .checked_sub(1)
-            .and_then(|i| self.diagrams.get(i))
-        {
-            Some(diagram) => diagram.clone().into_any_element(),
-            None => self.console.clone().into_any_element(),
+        let content = match self.pages.get(self.active) {
+            Some(Page::Console(console)) => console.clone().into_any_element(),
+            Some(Page::Diagram(diagram)) => diagram.clone().into_any_element(),
+            None => v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .text_sm()
+                .text_color(muted)
+                .child("No console open.")
+                .child(
+                    Button::new("empty-new-console")
+                        .small()
+                        .icon(Icon::new(Lucide::SquareTerminal))
+                        .label("New console (⌘T)")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.new_console(&NewConsole, window, cx)
+                        })),
+                )
+                .into_any_element(),
         };
 
         let main = v_flex()
             .size_full()
             .child(
-                TabBar::new("consoles")
+                TabBar::new("pages")
                     .underline()
-                    .child(console_tab)
-                    .children(diagram_tabs)
-                    .selected_index(self.active_tab.min(self.diagrams.len()))
+                    .children(tabs)
+                    .selected_index(self.active)
+                    .suffix(
+                        Button::new("new-console")
+                            .ghost()
+                            .xsmall()
+                            .mx_1()
+                            .icon(Icon::new(IconName::Plus))
+                            .tooltip("New console (⌘T)")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.new_console(&NewConsole, window, cx)
+                            })),
+                    )
                     .on_click(move |ix, _, cx| {
                         let ix = *ix;
                         workspace
                             .update(cx, |this, cx| {
-                                this.active_tab = ix;
+                                this.active = ix;
                                 cx.notify();
                             })
                             .ok();
@@ -356,6 +489,7 @@ impl Render for Workspace {
 
         v_flex()
             .size_full()
+            .on_action(cx.listener(Self::new_console))
             .bg(theme.background)
             .text_color(theme.foreground)
             .child(title_bar)

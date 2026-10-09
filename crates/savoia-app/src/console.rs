@@ -1,7 +1,8 @@
 //! Query console: toolbar, SQL editor and the output/result panes below it.
 //!
-//! Run sends the selection (or the whole editor) to the session selected in
-//! the explorer. A reader task moves the query's events into the grid, pausing
+//! Run sends the selection (or the whole editor) to the console's data
+//! source: the one it was opened on, else the one selected in the explorer
+//! at its first run. A reader task moves the query's events into the grid, pausing
 //! while the grid has enough rows (see [`Pacer`]).
 
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use savoia_core::{AppError, QueryEvent};
+use savoia_core::{AppError, ConnectionId, QueryEvent};
 
 use crate::data_sources::{DataSources, SourceState};
 use crate::explorer::Explorer;
@@ -73,6 +74,9 @@ struct Running {
 pub struct QueryConsole {
     data_sources: Entity<DataSources>,
     explorer: Entity<Explorer>,
+    /// The data source this console runs on. `None` until the first run
+    /// when opened with nothing selected.
+    source: Option<ConnectionId>,
     editor: Entity<EditorState>,
     results: Vec<ResultTab>,
     output: Vec<OutputLine>,
@@ -86,6 +90,7 @@ impl QueryConsole {
     pub fn new(
         data_sources: Entity<DataSources>,
         explorer: Entity<Explorer>,
+        source: Option<ConnectionId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -94,6 +99,7 @@ impl QueryConsole {
         Self {
             data_sources,
             explorer,
+            source,
             editor,
             results: Vec::new(),
             output: Vec::new(),
@@ -129,16 +135,25 @@ impl QueryConsole {
         self.running.is_some()
     }
 
-    /// The session selected in the explorer, if it's connected.
-    fn session(&self, cx: &App) -> Result<Arc<Session>, &'static str> {
+    /// The data source this console runs on, or the one selected in the
+    /// explorer while it isn't bound yet.
+    pub fn source(&self, cx: &App) -> Option<ConnectionId> {
+        self.source
+            .or_else(|| self.explorer.read(cx).selected_connection(cx))
+    }
+
+    pub fn is_bound(&self) -> bool {
+        self.source.is_some()
+    }
+
+    /// The session of [`Self::source`], if it's connected.
+    fn session(&self, cx: &App) -> Result<(ConnectionId, Arc<Session>), &'static str> {
         let id = self
-            .explorer
-            .read(cx)
-            .selected_connection(cx)
+            .source(cx)
             .ok_or("Select a data source in the explorer to run queries.")?;
         match self.data_sources.read(cx).state(id) {
-            SourceState::Connected(session) => Ok(session.clone()),
-            _ => Err("Connect the selected data source to run queries."),
+            SourceState::Connected(session) => Ok((id, session.clone())),
+            _ => Err("Connect this console's data source to run queries."),
         }
     }
 
@@ -188,12 +203,12 @@ impl QueryConsole {
         sql.to_string()
     }
 
-    fn run(&mut self, _: &RunQuery, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn run(&mut self, _: &RunQuery, window: &mut Window, cx: &mut Context<Self>) {
         if self.running.is_some() {
             return;
         }
-        let session = match self.session(cx) {
-            Ok(session) => session,
+        let (id, session) = match self.session(cx) {
+            Ok(found) => found,
             Err(message) => {
                 window.push_notification(Notification::warning(message), cx);
                 return;
@@ -203,6 +218,7 @@ impl QueryConsole {
         if sql.trim().is_empty() {
             return;
         }
+        self.source = Some(id);
 
         self.results.clear();
         self.output.clear();
@@ -275,7 +291,7 @@ impl QueryConsole {
         cx.notify();
     }
 
-    fn cancel(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
         let Some(running) = self.running.take() else {
             return;
         };
@@ -420,9 +436,7 @@ impl QueryConsole {
         let tool = |id: &'static str| Button::new(id).custom(theme::band_button(cx)).small();
         let running = self.is_running();
         let source = self
-            .explorer
-            .read(cx)
-            .selected_connection(cx)
+            .source(cx)
             .and_then(|id| self.data_sources.read(cx).get(id))
             .map(|c| c.display_name());
 

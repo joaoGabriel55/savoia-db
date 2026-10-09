@@ -115,13 +115,14 @@ impl NodeRef {
 
 pub enum ExplorerEvent {
     ShowDiagram(NodeRef),
-    /// SQL for the query console.
+    /// SQL for a query console on `connection`.
     Sql {
+        connection: ConnectionId,
         sql: String,
         /// Run it now, or only place it in the editor.
         run: bool,
-        /// A catalog to refresh once the statement has been sent.
-        refresh: Option<ConnectionId>,
+        /// Refresh the catalog once the statement has been sent.
+        refresh: bool,
     },
 }
 
@@ -609,10 +610,12 @@ impl Explorer {
         self.tree.update(cx, |tree, cx| {
             tree.set_selected_item(Some(&TreeItem::new(row.clone(), "")), cx)
         });
+        let connection = object.connection;
         let sql = |sql: String, run| ExplorerEvent::Sql {
+            connection,
             sql,
             run,
-            refresh: None,
+            refresh: false,
         };
         match action {
             TableAction::OpenData => cx.emit(sql(object.select_sql(), true)),
@@ -668,7 +671,7 @@ impl Explorer {
             )
         };
         let this = cx.entity().downgrade();
-        let refresh = drop.then_some(object.connection);
+        let (source, refresh) = (object.connection, drop);
         window.open_alert_dialog(cx, move |alert, _, cx| {
             let theme = cx.theme();
             let this = this.clone();
@@ -700,6 +703,7 @@ impl Explorer {
                     let sql = run.clone();
                     this.update(cx, |_, cx| {
                         cx.emit(ExplorerEvent::Sql {
+                            connection: source,
                             sql,
                             run: true,
                             refresh,

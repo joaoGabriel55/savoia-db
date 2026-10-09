@@ -25,6 +25,7 @@ fn main() {
             gpui_kit::init(cx);
             theme::apply(cx);
             console::init(cx);
+            workspace::init(cx);
 
             let bounds = Bounds::centered(None, size(px(1360.), px(860.)), cx);
             let options = WindowOptions {

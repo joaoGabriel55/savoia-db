@@ -18,6 +18,7 @@ use crate::data_sources::{DataSources, DataSourcesEvent, RefreshState, SourceSta
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, NodeRef};
 use crate::session::Session;
+use crate::workspace::{NewConsole, Workspace};
 
 fn mount(
     cx: &mut TestAppContext,
@@ -152,7 +153,7 @@ fn console_on(
     let (window, console) = cx
         .update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| QueryConsole::new(ds.clone(), explorer, window, cx))
+                cx.new(|cx| QueryConsole::new(ds.clone(), explorer, None, window, cx))
             })
         })
         .expect("window");
@@ -801,4 +802,69 @@ async fn postgres_explorer_loads_another_database_on_expand(cx: &mut TestAppCont
 
     // FORCE closes the explorer's connection to it.
     exec(session, "DROP DATABASE it_other WITH (FORCE)");
+}
+
+/// Each console tab keeps its own editor, runs on the source it was opened
+/// on, and closing it cancels its query.
+#[gpui_kit::test]
+async fn postgres_console_tabs_are_independent(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    let session = session_of(cx, &ds).expect("connected");
+    cx.update(|cx| {
+        crate::console::init(cx);
+        crate::workspace::init(cx);
+    });
+    let (window, workspace) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| Workspace::with_data_sources(ds.clone(), window, cx))
+            })
+        })
+        .expect("window");
+    let consoles = |cx: &mut TestAppContext| {
+        workspace.read_with(cx, |w, _| w.consoles().cloned().collect::<Vec<_>>())
+    };
+    workspace.update(cx, |w, cx| {
+        w.explorer()
+            .clone()
+            .update(cx, |e, cx| e.select_first_source(cx))
+    });
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |w, cx| w.new_console(&NewConsole, window, cx));
+    })
+    .unwrap();
+    let [first, second] = consoles(cx).try_into().expect("two consoles");
+    assert_eq!(second.read_with(cx, |c, cx| c.source(cx)), Some(id));
+
+    // Only the active tab renders, so run each console directly.
+    let run_in = |cx: &mut TestAppContext, console: &Entity<QueryConsole>, sql: &str| {
+        let sql = sql.to_owned();
+        cx.update_window(window, |_, window, cx| {
+            console.update(cx, |c, cx| {
+                c.editor()
+                    .clone()
+                    .update(cx, |editor, cx| editor.set_value(sql, window, cx));
+                c.run(&crate::console::RunQuery, window, cx);
+            })
+        })
+        .unwrap();
+    };
+    run_in(cx, &first, "SELECT 1");
+    wait_until(cx, "the first run", |cx| {
+        !first.read_with(cx, |c, _| c.is_running())
+    });
+    run_in(cx, &second, "SELECT g FROM generate_series(1, 100000) g");
+    wait_until(cx, "the pause", |cx| paused(cx, &second));
+    assert!(session.is_busy());
+
+    workspace.update(cx, |w, cx| w.close(1, cx));
+    drop(second);
+    wait_until(cx, "the cancel", |_| !session.is_busy());
+    let [first] = consoles(cx).try_into().expect("one console");
+    let text = first.read_with(cx, |c, cx| c.editor().read(cx).value().to_string());
+    assert_eq!(text, "SELECT 1");
 }
