@@ -66,11 +66,12 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 - Tests: unit tests, live suites against Docker (Postgres with TLS, MySQL, SSH bastion), and headless UI tests driving the real form and explorer. CI runs the live suites.
 - Deferred, then done in M2: password prompt on connect; lazy loading of non-current Postgres databases.
 
-### M2: Explore and query (weeks 4–6)
+### M2: Explore and query (weeks 4–6) ✅
 - Driver trait: list objects, describe table, execute (streamed), cancel.
 - Schema tree (lazy-loaded, with counts), multiple console tabs, schema-aware completion via the editor's completion provider (tables, columns, JOIN suggestions using FKs, like DataGrip).
 - Virtualized result grid, multiple result sets, timing/rows-affected, copy/export of results.
 - Query history (searchable).
+- Also shipped: run the statement at the caret (statement splitter in `savoia-core`), table Structure view with DDL, password prompt on connect, browsing of other Postgres databases.
 
 ### M3: Data view (weeks 7–9)
 - No-SQL data view per table, with server-side pages, sort and filter chips.

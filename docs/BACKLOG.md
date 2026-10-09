@@ -3,11 +3,11 @@
 The work still missing from [PLAN.md](./PLAN.md), split into tasks small enough to ship one per PR.
 Each task lists where it lives, what "done" means, and a rough estimate for one developer.
 
-Status as of 2026-10-09: M0 and M1 are done. M2 is partly done. M3–M5 have not started, except read-only sessions (already enforced in the drivers).
+Status as of 2026-10-09: M0, M1 and M2 are done. M3–M5 have not started, except read-only sessions (already enforced in the drivers).
 
 Legend: **[ ]** open · **[~]** partly done · **[x]** done
 
-## Now: finish M2 (Explore and query)
+## Done: M2 (Explore and query)
 
 Already shipped: lazy schema tree with counts, ER diagrams, streamed execute, cancel, multiple result sets, timing and rows-affected, table context menu.
 
@@ -20,7 +20,7 @@ Already shipped: lazy schema tree with counts, ER diagrams, streamed execute, ca
 | 2.5 | [x] Query history | `savoia-store` (new migration), `console.rs` | Every run is saved with connection, time, duration and row count; a searchable panel re-opens a query in the console. | 1–1½ days |
 | 2.6 | [x] Table "Structure" view | `table_menu.rs` (item disabled, tagged M2), new view | Shows columns, indexes, FKs and DDL from `describe_table`. | 1 day |
 | 2.7 | [x] Schema-aware completion | `console.rs`, completion provider | Suggests schemas, tables and columns from the loaded catalog, and JOIN conditions from FKs. | 2–3 days |
-| 2.8 | [ ] Close M2 | `PLAN.md` | M2 marked ✅; UI tests cover tabs, history and completion. | ¼ day |
+| 2.8 | [x] Close M2 | `PLAN.md` | M2 marked ✅; UI tests cover tabs, history and completion. | ¼ day |
 
 ## Debt carried from M1
 
@@ -29,7 +29,7 @@ Already shipped: lazy schema tree with counts, ER diagrams, streamed execute, ca
 | 1.1 | [x] Password prompt on connect | Connecting with no stored password asks for it instead of failing with an auth error. | ½ day |
 | 1.2 | [x] Lazy-load non-current Postgres databases | Expanding another database opens a connection to it and loads its schemas. | 1 day |
 
-## Next: M3 (Data view), about 2½ weeks
+## Now: M3 (Data view), about 2½ weeks
 
 A no-SQL view per table that browses, edits and queries data, joins included. See the ADRs on the [data view](./adr/202610091908-add-a-no-sql-data-view-with-visual-joins-to-v1.md), [joins](./adr/202610091908-build-joins-from-foreign-key-relationship-paths.md) and [edits](./adr/202610091908-write-data-edits-as-generated-sql-in-one-previewed-transaction.md).
 
