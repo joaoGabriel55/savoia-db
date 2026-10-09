@@ -2,7 +2,7 @@
 
 A lightweight but rich, cross-platform desktop database client. MySQL and PostgreSQL come first. 100% Rust, with a native GPU-rendered UI (GPUI Kit). DataGrip-style IDE layout with Beekeeper-style connection flow and Savoia's own branding.
 
-Decisions behind this plan live in [`docs/adr/`](./adr/README.md).
+Decisions behind this plan live in [`docs/adr/`](./adr/README.md). Open work, task by task, is in [BACKLOG.md](./BACKLOG.md).
 
 ## 1. Product scope
 
