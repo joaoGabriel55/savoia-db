@@ -196,7 +196,7 @@ impl Connection for MysqlConnection {
                 DatabaseNode {
                     is_current: current.as_deref() == Some(name.as_str()),
                     name,
-                    schemas: vec![schema],
+                    schemas: Some(vec![schema]),
                 }
             })
             .collect();

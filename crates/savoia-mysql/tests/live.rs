@@ -63,7 +63,7 @@ async fn connects_and_reads_catalog() {
         .find(|d| d.is_current)
         .expect("current db");
     assert_eq!(Some(current.name.as_str()), config.database.as_deref());
-    let [schema] = current.schemas.as_slice() else {
+    let Some([schema]) = current.schemas.as_deref() else {
         panic!("one schema per MySQL database")
     };
     assert_eq!(schema.objects, None, "names load on demand");
@@ -74,7 +74,7 @@ async fn connects_and_reads_catalog() {
         .iter()
         .find(|d| d.name == "information_schema")
         .expect("information_schema");
-    assert!(system.schemas[0].counts.views > 0);
+    assert!(system.schemas.as_ref().unwrap()[0].counts.views > 0);
 
     let objects = conn
         .list_objects(&current.name, &current.name)

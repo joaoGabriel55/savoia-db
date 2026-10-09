@@ -63,3 +63,4 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Load schema objects and table details on demand](./202610091437-load-schema-objects-and-table-details-on-demand.md) | Proposed |
 | 2026-10-09 | [Store connection secrets in a user-only file](./202610091454-store-connection-secrets-in-a-user-only-file.md) | Accepted |
 | 2026-10-09 | [Name the product Savoia Studio](./202610091612-name-the-product-savoia-studio.md) | Accepted |
+| 2026-10-09 | [Open a catalog connection per other Postgres database](./202610091856-open-a-catalog-connection-per-other-postgres-database.md) | Accepted |

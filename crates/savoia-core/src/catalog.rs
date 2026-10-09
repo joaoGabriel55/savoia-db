@@ -37,10 +37,10 @@ pub struct DatabaseNode {
     pub name: String,
     /// The database the session is connected to (Postgres) or the default one (MySQL).
     pub is_current: bool,
-    /// Its schemas. Empty when the connection can't read them (other Postgres
-    /// databases need their own session). For MySQL there is exactly one
-    /// schema, named like the database.
-    pub schemas: Vec<SchemaNode>,
+    /// Its schemas, or `None` until loaded: other Postgres databases need a
+    /// connection of their own. For MySQL there is exactly one schema, named
+    /// like the database, always loaded.
+    pub schemas: Option<Vec<SchemaNode>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,20 +50,31 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    pub fn database(&self, database: &str) -> Option<&DatabaseNode> {
+        self.databases.iter().find(|d| d.name == database)
+    }
+
+    pub fn database_mut(&mut self, database: &str) -> Option<&mut DatabaseNode> {
+        self.databases.iter_mut().find(|d| d.name == database)
+    }
+
+    /// The database the connection is on (Postgres) or the default one (MySQL).
+    pub fn current(&self) -> Option<&DatabaseNode> {
+        self.databases.iter().find(|d| d.is_current)
+    }
+
     pub fn schema(&self, database: &str, schema: &str) -> Option<&SchemaNode> {
-        self.databases
-            .iter()
-            .find(|d| d.name == database)?
+        self.database(database)?
             .schemas
+            .as_ref()?
             .iter()
             .find(|s| s.name == schema)
     }
 
     pub fn schema_mut(&mut self, database: &str, schema: &str) -> Option<&mut SchemaNode> {
-        self.databases
-            .iter_mut()
-            .find(|d| d.name == database)?
+        self.database_mut(database)?
             .schemas
+            .as_mut()?
             .iter_mut()
             .find(|s| s.name == schema)
     }

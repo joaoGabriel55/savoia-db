@@ -1,8 +1,9 @@
 //! Main window: title bar, explorer | console and diagram tabs, status bar. Also turns
-//! data-source events into notifications and the host-key trust prompt.
+//! data-source events into notifications and the host-key trust and password prompts.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 use gpui_kit::component::status_bar::StatusBar;
@@ -12,6 +13,7 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::*;
+use savoia_core::ConnectionId;
 use savoia_tunnel::HostKeyPolicy;
 
 use crate::console::QueryConsole;
@@ -147,7 +149,61 @@ impl Workspace {
                         })
                 });
             }
+            DataSourcesEvent::NeedsPassword { id, error } => {
+                self.ask_password(*id, error.clone(), data_sources.clone(), window, cx);
+            }
         }
+    }
+
+    /// Asks for the database password of `id`, then connects with it.
+    fn ask_password(
+        &mut self,
+        id: ConnectionId,
+        error: Option<String>,
+        data_sources: Entity<DataSources>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(config) = data_sources.read(cx).get(id).cloned() else {
+            return;
+        };
+        let password = cx.new(|cx| {
+            InputState::new(window, cx)
+                .masked(true)
+                .placeholder("Password")
+        });
+        password.update(cx, |input, cx| input.focus(window, cx));
+        let target = format!("{}@{}:{}", config.user, config.host, config.port);
+        let note = if config.save_password {
+            "It is saved once the connection works."
+        } else {
+            "It is kept until Savoia Studio quits."
+        };
+        window.open_alert_dialog(cx, move |alert, _, cx| {
+            let theme = cx.theme();
+            let (data_sources, input) = (data_sources.clone(), password.clone());
+            alert
+                .icon(Icon::new(Lucide::KeyRound).text_color(theme.muted_foreground))
+                .title(format!("Password for {}", config.display_name()))
+                .description(
+                    v_flex()
+                        .gap_3()
+                        .children(
+                            error
+                                .clone()
+                                .map(|e| div().text_color(theme.danger).child(e)),
+                        )
+                        .child(format!("Connecting as {target}. {note}"))
+                        .child(Input::new(&password).mask_toggle()),
+                )
+                .show_cancel(true)
+                .ok_text("Connect")
+                .on_ok(move |_, _, cx| {
+                    let value = input.read(cx).value().to_string();
+                    data_sources.update(cx, |ds, cx| ds.connect_with_password(id, value, cx));
+                    true
+                })
+        });
     }
 }
 

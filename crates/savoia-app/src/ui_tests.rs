@@ -2,6 +2,8 @@
 //! The live test needs `SAVOIA_PG_URL` (docker compose); it polls in real
 //! time because database I/O runs on the Tokio runtime, not the test clock.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +14,7 @@ use savoia_store::{ConnectionStore, MemorySecrets};
 
 use crate::connection_form::ConnectionForm;
 use crate::console::QueryConsole;
-use crate::data_sources::{DataSources, RefreshState, SourceState};
+use crate::data_sources::{DataSources, DataSourcesEvent, RefreshState, SourceState};
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, NodeRef};
 use crate::session::Session;
@@ -689,4 +691,114 @@ async fn postgres_open_data_keeps_the_users_sql(cx: &mut TestAppContext) {
     );
     assert_eq!(console.read_with(cx, |c, _| c.results().len()), 1);
     assert!(grid(cx, &console).0 > 1);
+}
+
+/// Connecting without a stored password asks for one; a wrong one asks
+/// again with the server's error; the right one connects and is kept.
+#[gpui_kit::test]
+async fn postgres_connect_asks_for_a_missing_password(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let without = url.replacen(":savoia@", "@", 1);
+    assert_ne!(without, url, "SAVOIA_PG_URL has the password savoia");
+    cx.executor().allow_parking();
+    let (ds, form, window) = mount(cx);
+    let asked = Rc::new(RefCell::new(Vec::new()));
+    cx.update(|cx| {
+        let asked = asked.clone();
+        cx.subscribe(&ds, move |_, event, _| {
+            if let DataSourcesEvent::NeedsPassword { error, .. } = event {
+                asked.borrow_mut().push(error.clone());
+            }
+        })
+        .detach();
+    });
+    import(cx, window, &form, &without);
+    click(cx, window, "save-connect");
+    let id = ds
+        .read_with(cx, |ds, _| ds.connections().first().map(|c| c.id))
+        .expect("saved");
+
+    wait_until(cx, "the password prompt", |_| asked.borrow().len() == 1);
+    assert_eq!(asked.borrow()[0], None, "nothing was tried yet");
+
+    ds.update(cx, |ds, cx| {
+        ds.connect_with_password(id, "wrong".into(), cx)
+    });
+    wait_until(cx, "the second prompt", |_| asked.borrow().len() == 2);
+    let error = asked.borrow()[1].clone().expect("the server's error");
+    assert!(error.contains("password"), "{error}");
+
+    ds.update(cx, |ds, cx| {
+        ds.connect_with_password(id, "savoia".into(), cx)
+    });
+    wait_until(cx, "the session", |cx| {
+        ds.read_with(cx, |ds, _| {
+            matches!(ds.state(id), SourceState::Connected(_))
+        })
+    });
+    let secrets = ds.read_with(cx, |ds, _| ds.load_secrets(id)).await.unwrap();
+    assert_eq!(secrets.password.as_deref(), Some("savoia"));
+}
+
+/// Expanding another Postgres database opens a connection to it and loads
+/// its schemas, while a query holds the session's own connection. Refresh
+/// keeps them loaded.
+#[gpui_kit::test]
+async fn postgres_explorer_loads_another_database_on_expand(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, console, window) = console_on(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    let session = session_of(cx, &ds).expect("connected");
+    exec(
+        session.clone(),
+        "DROP DATABASE IF EXISTS it_other WITH (FORCE)",
+    );
+    exec(session.clone(), "CREATE DATABASE it_other");
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+    let explorer = cx.new(|cx| Explorer::new(ds.clone(), cx));
+    settled_labels(cx, &explorer);
+
+    // The console's paused result holds the session's connection.
+    run(
+        cx,
+        window,
+        &console,
+        "SELECT g FROM generate_series(1, 100000) g",
+    );
+    wait_until(cx, "the pause", |cx| paused(cx, &console));
+    explorer.update(cx, |e, cx| e.expand(&["it_other"], cx));
+    let labels = settled_labels(cx, &explorer);
+    let db = labels
+        .iter()
+        .position(|l| l == "it_other")
+        .expect("it_other");
+    assert_eq!(
+        labels.get(db + 1).map(String::as_str),
+        Some("public"),
+        "{labels:?}"
+    );
+    assert!(session.is_busy(), "loaded beside the running query");
+    click(cx, window, "cancel");
+
+    explorer.update(cx, |e, cx| e.expand(&["it_other", "public"], cx));
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+    let labels = settled_labels(cx, &explorer);
+    let db = labels
+        .iter()
+        .position(|l| l == "it_other")
+        .expect("it_other");
+    assert_eq!(
+        labels[db + 1..db + 4],
+        ["public", "tables", "views"],
+        "{labels:?}"
+    );
+
+    // FORCE closes the explorer's connection to it.
+    exec(session, "DROP DATABASE it_other WITH (FORCE)");
 }
