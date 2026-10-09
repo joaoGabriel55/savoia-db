@@ -1,5 +1,6 @@
-//! Local persistence: saved connections in SQLite, secrets in a file only the
-//! user can read. See ADR "Store connection secrets in a user-only file".
+//! Local persistence: saved connections and query history in SQLite, secrets
+//! in a file only the user can read. See ADR "Store connection secrets in a
+//! user-only file".
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -17,19 +18,50 @@ pub struct SavedConnection {
     pub last_used_at: Option<SystemTime>,
 }
 
-/// Saved connections. Not `Sync`; keep it on one thread or behind a mutex.
+/// One run of the query console.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryEntry {
+    pub connection: ConnectionId,
+    pub sql: String,
+    pub ran_at: SystemTime,
+    pub duration: Duration,
+    /// Rows returned plus rows affected, over every statement of the run.
+    pub rows: u64,
+    /// Set when the run failed.
+    pub error: Option<String>,
+}
+
+/// History keeps the most recent runs only.
+const HISTORY_LIMIT: i64 = 10_000;
+
+/// Saved connections and query history. Not `Sync`; keep it on one thread
+/// or behind a mutex.
 pub struct ConnectionStore {
     db: rusqlite::Connection,
 }
 
 /// Schema migrations, applied in order; `PRAGMA user_version` is the index of
 /// the last one applied. Append only.
-const MIGRATIONS: &[&str] = &["CREATE TABLE connections (
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE connections (
         id           TEXT PRIMARY KEY,
         config       TEXT NOT NULL,
         created_at   INTEGER NOT NULL,
         last_used_at INTEGER
-    );"];
+    );",
+    // Query text is kept as typed, so it can hold anything the user ran,
+    // secrets included; it lives next to the connections, private to the user.
+    "CREATE TABLE history (
+        id            INTEGER PRIMARY KEY,
+        connection_id TEXT NOT NULL,
+        sql           TEXT NOT NULL,
+        ran_at        INTEGER NOT NULL,
+        duration_ms   INTEGER NOT NULL,
+        rows          INTEGER NOT NULL,
+        error         TEXT
+    );
+    CREATE INDEX history_by_time ON history (ran_at DESC);",
+];
 
 impl ConnectionStore {
     /// Opens `<data dir>/savoia-db/savoia.sqlite`, creating it if needed.
@@ -98,11 +130,85 @@ impl ConnectionStore {
         Ok(())
     }
 
+    /// Deletes the connection and its query history.
     pub fn delete(&self, id: ConnectionId) -> AppResult<()> {
+        for sql in [
+            "DELETE FROM connections WHERE id = ?1",
+            "DELETE FROM history WHERE connection_id = ?1",
+        ] {
+            self.db
+                .execute(sql, [id.to_string()])
+                .map_err(AppError::storage)?;
+        }
+        Ok(())
+    }
+
+    /// Adds a run to the history, dropping the oldest beyond the limit.
+    pub fn record(&self, entry: &HistoryEntry) -> AppResult<()> {
         self.db
-            .execute("DELETE FROM connections WHERE id = ?1", [id.to_string()])
+            .execute(
+                "INSERT INTO history (connection_id, sql, ran_at, duration_ms, rows, error)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    entry.connection.to_string(),
+                    entry.sql,
+                    unix_millis(entry.ran_at),
+                    entry.duration.as_millis() as i64,
+                    entry.rows as i64,
+                    entry.error,
+                ],
+            )
+            .map_err(AppError::storage)?;
+        self.db
+            .execute(
+                "DELETE FROM history WHERE id <= (SELECT id FROM history ORDER BY id DESC LIMIT 1 OFFSET ?1)",
+                [HISTORY_LIMIT],
+            )
             .map_err(AppError::storage)?;
         Ok(())
+    }
+
+    /// The latest runs whose SQL contains `search` (ignoring ASCII case),
+    /// newest first.
+    pub fn history(&self, search: &str, limit: usize) -> AppResult<Vec<HistoryEntry>> {
+        let pattern = format!(
+            "%{}%",
+            search
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT connection_id, sql, ran_at, duration_ms, rows, error FROM history
+                 WHERE sql LIKE ?1 ESCAPE '\\' ORDER BY id DESC LIMIT ?2",
+            )
+            .map_err(AppError::storage)?;
+        let rows = stmt
+            .query_map(params![pattern, limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })
+            .map_err(AppError::storage)?;
+        rows.map(|row| {
+            let (id, sql, ran_at, ms, rows, error) = row.map_err(AppError::storage)?;
+            Ok(HistoryEntry {
+                connection: ConnectionId(id.parse().map_err(AppError::storage)?),
+                sql,
+                ran_at: UNIX_EPOCH + Duration::from_millis(ran_at as u64),
+                duration: Duration::from_millis(ms as u64),
+                rows: rows as u64,
+                error,
+            })
+        })
+        .collect()
     }
 
     /// Records a successful connect, for the recent list.
@@ -359,6 +465,63 @@ mod tests {
         let reopened = ConnectionStore::open(&path).unwrap();
         assert_eq!(reopened.get(c.id).unwrap().unwrap().config, c);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn run(connection: ConnectionId, sql: &str) -> HistoryEntry {
+        HistoryEntry {
+            connection,
+            sql: sql.into(),
+            ran_at: UNIX_EPOCH + Duration::from_secs(1_000),
+            duration: Duration::from_millis(12),
+            rows: 3,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn history_searches_newest_first_and_goes_with_its_connection() {
+        let store = ConnectionStore::open_in_memory().unwrap();
+        let (a, b) = (config("a"), config("b"));
+        store.save(&a).unwrap();
+        store.save(&b).unwrap();
+        store.record(&run(a.id, "SELECT * FROM orders")).unwrap();
+        store
+            .record(&HistoryEntry {
+                error: Some("boom".into()),
+                ..run(b.id, "select 100% FROM Orders_x")
+            })
+            .unwrap();
+        store.record(&run(a.id, "DELETE FROM users")).unwrap();
+
+        let sql = |search: &str| -> Vec<String> {
+            store
+                .history(search, 10)
+                .unwrap()
+                .into_iter()
+                .map(|e| e.sql)
+                .collect()
+        };
+        assert_eq!(
+            sql(""),
+            [
+                "DELETE FROM users",
+                "select 100% FROM Orders_x",
+                "SELECT * FROM orders"
+            ]
+        );
+        assert_eq!(
+            sql("ORDERS"),
+            ["select 100% FROM Orders_x", "SELECT * FROM orders"]
+        );
+        assert_eq!(sql("100%"), ["select 100% FROM Orders_x"]);
+        assert_eq!(sql("s_x"), ["select 100% FROM Orders_x"], "_ is literal");
+        assert_eq!(
+            store.history("", 1).unwrap()[0],
+            run(a.id, "DELETE FROM users")
+        );
+
+        store.delete(b.id).unwrap();
+        assert_eq!(sql("100"), Vec::<String>::new());
     }
 
     #[test]

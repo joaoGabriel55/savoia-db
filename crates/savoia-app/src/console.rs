@@ -6,8 +6,9 @@
 //! at its first run. A reader task moves the query's events into the grid, pausing
 //! while the grid has enough rows (see [`Pacer`]).
 
+use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -25,9 +26,11 @@ use std::path::PathBuf;
 
 use savoia_core::export::Format;
 use savoia_core::{AppError, ConnectionId, Engine, QueryEvent, split};
+use savoia_store::HistoryEntry;
 
 use crate::data_sources::{DataSources, SourceState};
 use crate::explorer::Explorer;
+use crate::history::HistoryPanel;
 use crate::results::{Next, Pacer, ResultSet};
 use crate::session::{self, Session};
 use crate::theme::BandDisabled as _;
@@ -78,6 +81,12 @@ struct OutputLine {
 /// `RunningQuery`, which cancels and drains in the background.
 struct Running {
     started: Instant,
+    ran_at: SystemTime,
+    source: ConnectionId,
+    sql: String,
+    /// Rows returned and affected so far, for the history.
+    rows: u64,
+    error: Option<String>,
     _reader: Task<()>,
 }
 
@@ -350,6 +359,7 @@ impl QueryConsole {
         self.pending_export = None;
         self.filter
             .update(cx, |filter, cx| filter.set_value("", window, cx));
+        let run_sql = sql.clone();
         let reader = cx.spawn_in(window, async move |this, cx| {
             let started = session::join(runtime::spawn(async move { session.execute(sql).await }));
             let mut query = match started.await {
@@ -412,15 +422,22 @@ impl QueryConsole {
         });
         self.running = Some(Running {
             started: Instant::now(),
+            ran_at: SystemTime::now(),
+            source: id,
+            sql: run_sql,
+            rows: 0,
+            error: None,
             _reader: reader,
         });
         cx.notify();
     }
 
     pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
-        let Some(running) = self.running.take() else {
+        let Some(mut running) = self.running.take() else {
             return;
         };
+        running.error = Some("cancelled".into());
+        self.record(&running, cx);
         drop(running);
         // Only the last result can still be streaming.
         let streaming = self
@@ -496,6 +513,12 @@ impl QueryConsole {
             (None, Some(affected)) => format!("{} affected", count(affected as usize, "row")),
             (None, None) => "OK".to_string(),
         };
+        if let Some(running) = &mut self.running {
+            running.rows += match rows {
+                Some(rows) => (rows + skipped) as u64,
+                None => rows_affected.unwrap_or(0),
+            };
+        }
         let line = format!("{what} · {}", duration(elapsed));
         if rows.is_some() {
             self.set_last_summary(line.clone());
@@ -511,6 +534,9 @@ impl QueryConsole {
 
     fn fail(&mut self, err: AppError, window: &mut Window, cx: &mut Context<Self>) {
         let message = err.to_string();
+        if let Some(running) = &mut self.running {
+            running.error = Some(message.clone());
+        }
         self.log(message.clone(), true);
         self.pane = Pane::Output;
         window.push_notification(Notification::error(message), cx);
@@ -520,6 +546,7 @@ impl QueryConsole {
     /// The execution ended (all statements done, or an error).
     fn finish(&mut self, cx: &mut Context<Self>) {
         if let Some(running) = self.running.take() {
+            self.record(&running, cx);
             self.stop_grid(cx);
             let time = duration(running.started.elapsed());
             self.summary = Some(
@@ -531,6 +558,44 @@ impl QueryConsole {
             );
         }
         cx.notify();
+    }
+
+    fn record(&self, running: &Running, cx: &mut Context<Self>) {
+        let entry = HistoryEntry {
+            connection: running.source,
+            sql: running.sql.clone(),
+            ran_at: running.ran_at,
+            duration: running.started.elapsed(),
+            rows: running.rows,
+            error: running.error.clone(),
+        };
+        self.data_sources
+            .update(cx, |ds, _| ds.record_history(&entry));
+    }
+
+    /// Opens the history; picking an entry puts its SQL in this console.
+    fn show_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let console = cx.entity().downgrade();
+        let panel = cx.new(|cx| {
+            HistoryPanel::new(
+                self.data_sources.clone(),
+                Rc::new(move |sql: String, window: &mut Window, cx: &mut App| {
+                    console
+                        .update(cx, |console, cx| {
+                            console.insert_sql(&sql, false, window, cx)
+                        })
+                        .ok();
+                }),
+                window,
+                cx,
+            )
+        });
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog
+                .title("Query history")
+                .w(px(720.))
+                .child(panel.clone())
+        });
     }
 
     /// Ends streaming into the last result, the only one that can stream.
@@ -611,7 +676,7 @@ impl QueryConsole {
                 tool("history")
                     .icon(Icon::new(Lucide::Timer))
                     .tooltip("Query history")
-                    .on_click(coming_later("Query history")),
+                    .on_click(cx.listener(|this, _, window, cx| this.show_history(window, cx))),
             )
             .child(
                 tool("tx")

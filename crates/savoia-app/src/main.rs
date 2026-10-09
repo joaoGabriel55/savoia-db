@@ -5,6 +5,7 @@ mod data_sources;
 mod diagram;
 mod erd_layout;
 mod explorer;
+mod history;
 mod memory;
 mod results;
 mod runtime;

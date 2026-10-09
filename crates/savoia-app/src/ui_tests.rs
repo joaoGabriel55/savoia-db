@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use gpui_kit::component::table::TableDelegate as _;
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext, WindowOptions};
+use gpui_kit::{
+    AnyWindowHandle, App, AppContext as _, Entity, TestAppContext, Window, WindowOptions,
+};
 use savoia_store::{ConnectionStore, MemorySecrets};
 
 use crate::connection_form::ConnectionForm;
@@ -17,6 +19,7 @@ use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, DataSourcesEvent, RefreshState, SourceState};
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, NodeRef};
+use crate::history::HistoryPanel;
 use crate::session::Session;
 use crate::workspace::{NewConsole, Workspace};
 
@@ -941,4 +944,55 @@ async fn postgres_result_filter_and_copy(cx: &mut TestAppContext) {
         copied.as_deref(),
         Some("n\tname\n1\tRoma\n2\tTorino\n3\t\\N\n4\t\n")
     );
+}
+
+/// Every run lands in the history, failed ones with their error; search
+/// narrows it, and picking an entry hands its SQL back.
+#[gpui_kit::test]
+async fn postgres_runs_are_kept_in_the_history(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, console, window) = console_on(cx, &url);
+    run(cx, window, &console, "SELECT 41 + 1 AS answer");
+    idle(cx, &console);
+    run(cx, window, &console, "SELECT no_such_column");
+    idle(cx, &console);
+
+    let picked = Rc::new(RefCell::new(None));
+    let panel = cx
+        .update_window(window, |_, window, cx| {
+            let picked = picked.clone();
+            cx.new(|cx| {
+                HistoryPanel::new(
+                    ds.clone(),
+                    Rc::new(move |sql: String, _: &mut Window, _: &mut App| {
+                        *picked.borrow_mut() = Some(sql)
+                    }),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    let entries = panel.read_with(cx, |p, _| p.entries().to_vec());
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].sql, "SELECT no_such_column");
+    assert!(
+        entries[0]
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("no_such_column"))
+    );
+    assert_eq!((entries[1].rows, entries[1].error.as_deref()), (1, None));
+
+    cx.update_window(window, |_, window, cx| {
+        let search = panel.read(cx).search().clone();
+        search.update(cx, |input, cx| input.set_value("41", window, cx));
+        panel.update(cx, |p, cx| p.reload(cx));
+        panel.update(cx, |p, cx| p.pick(0, window, cx));
+    })
+    .unwrap();
+    assert_eq!(panel.read_with(cx, |p, _| p.entries().len()), 1);
+    assert_eq!(picked.borrow().as_deref(), Some("SELECT 41 + 1 AS answer"));
 }
