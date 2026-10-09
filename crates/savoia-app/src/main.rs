@@ -9,6 +9,7 @@ mod memory;
 mod results;
 mod runtime;
 mod session;
+mod table_menu;
 mod theme;
 #[cfg(test)]
 mod ui_tests;

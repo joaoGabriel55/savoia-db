@@ -41,9 +41,7 @@ impl Workspace {
             cx.observe(&explorer, |_, _, cx| cx.notify()),
             cx.observe(&data_sources, |_, _, cx| cx.notify()),
             cx.subscribe_in(&data_sources, window, Self::on_data_source_event),
-            cx.subscribe(&explorer, |this, _, event, cx| match event {
-                ExplorerEvent::ShowDiagram(node) => this.show_diagram(node.clone(), cx),
-            }),
+            cx.subscribe_in(&explorer, window, Self::on_explorer_event),
         ];
         let console =
             cx.new(|cx| QueryConsole::new(data_sources.clone(), explorer.clone(), window, cx));
@@ -86,6 +84,29 @@ impl Workspace {
             self.active_tab -= 1;
         }
         cx.notify();
+    }
+
+    fn on_explorer_event(
+        &mut self,
+        _: &Entity<Explorer>,
+        event: &ExplorerEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ExplorerEvent::ShowDiagram(node) => self.show_diagram(node.clone(), cx),
+            ExplorerEvent::Sql { sql, run, refresh } => {
+                // The SQL lands in the console, so bring it forward.
+                self.active_tab = 0;
+                self.console
+                    .update(cx, |console, cx| console.insert_sql(sql, *run, window, cx));
+                // Queued behind the statement: refreshes wait for the running query.
+                if let Some(id) = refresh {
+                    self.data_sources.update(cx, |ds, cx| ds.refresh(*id, cx));
+                }
+                cx.notify();
+            }
+        }
     }
 
     fn on_data_source_event(
