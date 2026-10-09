@@ -57,3 +57,5 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Verify SSH host keys against known_hosts, with explicit trust](./202610091108-verify-ssh-host-keys-against-known-hosts-with-explicit-trust.md) | Accepted |
 | 2026-10-09 | [Brand Savoia with Olivetti-style green fields and a red Run action](./202610091120-brand-savoia-with-olivetti-style-green-fields-and-a-red-run-action.md) | Superseded by [Use Savoy blue, not red, as the brand accent](./202610091125-use-savoy-blue-not-red-as-the-brand-accent.md) |
 | 2026-10-09 | [Use Savoy blue, not red, as the brand accent](./202610091125-use-savoy-blue-not-red-as-the-brand-accent.md) | Accepted |
+| 2026-10-09 | [Stream query results as server-rendered text pages](./202610091303-stream-query-results-as-server-rendered-text-pages.md) | Accepted |
+| 2026-10-09 | [Serialize all work on one connection per session](./202610091309-serialize-all-work-on-one-connection-per-session.md) | Accepted |

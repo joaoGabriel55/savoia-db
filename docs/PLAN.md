@@ -40,8 +40,8 @@ Key design rules:
 
 - **UI never blocks.** Views own GPUI entities. Database work runs on a Tokio runtime owned by a `SessionRegistry`, and results flow back to entities via channels and `cx.spawn` / `cx.notify()`.
 - **Core crates know nothing about GPUI.** `savoia-app` is the only crate depending on `gpui-kit`, so drivers, dumps and storage are testable headless.
-- **Streaming results.** Execute returns a query handle, and rows arrive in pages that append to the `DataTable` delegate (`load_more` / `has_more`). Bounded in-memory buffer.
-- **Values are kept as display text + type tag + null flag.** Never lose precision (numeric, bigint, timestamps tz).
+- **Streaming results.** Execute returns a query handle, and rows arrive in pages over a bounded channel that append to the `DataTable` delegate (`load_more` / `has_more`). See [ADR](./adr/202610091303-stream-query-results-as-server-rendered-text-pages.md).
+- **Values are server-rendered text, with NULL kept distinct; type info is per column.** Never lose precision (numeric, bigint, timestamps tz).
 - **Cancellation everywhere.** Queries use PG `CancelToken` or MySQL `KILL QUERY`. Dumps and imports use a child-process kill or a `CancellationToken`.
 - **Errors**: `thiserror` in the crates, surfaced in the UI as notifications plus the console Output tab.
 - **Theme**: all colors come from `savoia-app/src/theme.rs` tokens. Icons must be registered in `assets.rs`.
@@ -104,7 +104,7 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 | GPUI is pre-1.0; breaking API changes | Pin `gpui-kit` exactly, keep UI code in `savoia-app` only, upgrade deliberately with a checklist. |
 | Missing widgets vs. web ecosystem | Build on GPUI primitives. Upstream fixes to gpui-kit where sensible. |
 | `pg_dump` version mismatch with the server | Version check, a clear error, and a setting to choose a specific binary. Fall back to the built-in engine. |
-| Huge result sets exhausting memory | Server-side cursors (PG portals, MySQL unbuffered), bounded buffers, and a "fetch more" model. |
+| Huge result sets exhausting memory | Wire backpressure (PG simple-query stream, MySQL unbuffered), bounded channels, and a "fetch more" model. |
 | Secrets leaking via argv/logs | Temp option files, redaction in logs, and secrets that never return to the UI. |
 | Scope creep toward a full Beekeeper/DBeaver clone | Hold the v1 list above. New engines and features need an ADR or roadmap entry. |
 
