@@ -1,0 +1,77 @@
+# Test databases for integration tests and manual QA.
+#   docker compose up -d          # newest of each engine
+#   docker compose --profile all up -d   # every supported version
+# Credentials everywhere: user "savoia", password "savoia", database "savoia".
+
+x-pg: &pg
+  environment:
+    POSTGRES_USER: savoia
+    POSTGRES_PASSWORD: savoia
+    POSTGRES_DB: savoia
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U savoia"]
+    interval: 2s
+    retries: 30
+
+x-mysql: &mysql
+  # Lets the non-root test user create functions while binary logging is on.
+  command: ["--log-bin-trust-function-creators=1"]
+  environment:
+    MYSQL_ROOT_PASSWORD: savoia
+    MYSQL_USER: savoia
+    MYSQL_PASSWORD: savoia
+    MYSQL_DATABASE: savoia
+  healthcheck:
+    test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-usavoia", "-psavoia"]
+    interval: 2s
+    retries: 60
+
+services:
+  postgres-17:
+    <<: *pg
+    image: postgres:17
+    # TLS on with the image's self-signed cert, to exercise sslmode handling.
+    command:
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      - -c
+      - ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+    ports: ["54317:5432"]
+
+  postgres-13:
+    <<: *pg
+    image: postgres:13
+    ports: ["54313:5432"]
+    profiles: [all]
+
+  mysql-8.4:
+    <<: *mysql
+    image: mysql:8.4
+    ports: ["33084:3306"]
+
+  mysql-8.0:
+    <<: *mysql
+    image: mysql:8.0
+    ports: ["33080:3306"]
+    profiles: [all]
+
+  # SSH bastion for tunnel tests: savoia/savoia on :2222. From inside it,
+  # the databases are reachable as postgres-17:5432 and mysql-8.4:3306.
+  ssh:
+    image: alpine:3.20
+    ports: ["2222:22"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "22"]
+      interval: 2s
+      retries: 60
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache openssh >/dev/null &&
+        ssh-keygen -A &&
+        adduser -D -s /bin/sh savoia && echo 'savoia:savoia' | chpasswd &&
+        sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/; s/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config &&
+        exec /usr/sbin/sshd -D -e

@@ -1,0 +1,18 @@
+[package]
+name = "savoia-tunnel"
+description = "SSH local port forwarding for Savoia DB connections (russh)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+savoia-core.workspace = true
+tokio.workspace = true
+russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa", "flate2"] }
+
+[dev-dependencies]
+savoia-pg.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

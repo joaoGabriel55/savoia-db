@@ -1,0 +1,22 @@
+[package]
+name = "savoia-pg"
+description = "PostgreSQL driver for Savoia DB (tokio-postgres)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+savoia-core.workspace = true
+tokio.workspace = true
+tokio-postgres = "0.7.18"
+tokio-postgres-rustls = { version = "0.14", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+
+[dev-dependencies]
+tokio = { workspace = true }
+tokio-postgres = "0.7.18"
+
+[lints]
+workspace = true

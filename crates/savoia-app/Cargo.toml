@@ -1,0 +1,26 @@
+[package]
+name = "savoia-app"
+description = "Savoia DB native desktop app (GPUI)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "savoia-db"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit.workspace = true
+savoia-core.workspace = true
+savoia-mysql.workspace = true
+savoia-pg.workspace = true
+savoia-store.workspace = true
+savoia-tunnel.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

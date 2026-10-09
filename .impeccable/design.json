@@ -1,0 +1,681 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-09T14:35:15+00:00",
+  "title": "Design System: Savoia DB",
+  "extensions": {
+    "colorMeta": {
+      "ivrea-green": {
+        "role": "primary",
+        "displayName": "Ivrea Green",
+        "canonical": "#1F5A43",
+        "tonalRamp": [
+          "#000F08",
+          "#042D1E",
+          "#104E38",
+          "#356E56",
+          "#579077",
+          "#79B499",
+          "#9DD9BD",
+          "#C2FFE2"
+        ]
+      },
+      "ivrea-green-hover": {
+        "role": "primary",
+        "displayName": "Ivrea Green Hover",
+        "canonical": "#286C51",
+        "tonalRamp": [
+          "#000F08",
+          "#022D1E",
+          "#0B4E37",
+          "#2C7055",
+          "#509275",
+          "#73B697",
+          "#97DABB",
+          "#C4FEE2"
+        ]
+      },
+      "ivrea-green-pressed": {
+        "role": "primary",
+        "displayName": "Ivrea Green Pressed",
+        "canonical": "#184634",
+        "tonalRamp": [
+          "#000F08",
+          "#012D1E",
+          "#1E4C3A",
+          "#3F6C58",
+          "#608E79",
+          "#82B19B",
+          "#A6D6BF",
+          "#CAFCE4"
+        ]
+      },
+      "ivrea-line": {
+        "role": "primary",
+        "displayName": "Ivrea Line",
+        "canonical": "#5FB088",
+        "tonalRamp": [
+          "#000F07",
+          "#032D1C",
+          "#0D4E34",
+          "#1A724E",
+          "#43956E",
+          "#68B990",
+          "#8CDEB4",
+          "#C5FEDF"
+        ]
+      },
+      "savoy-blue": {
+        "role": "secondary",
+        "displayName": "Azzurro Savoia",
+        "canonical": "#1F64B4",
+        "tonalRamp": [
+          "#000B1F",
+          "#00244E",
+          "#044180",
+          "#1B60B0",
+          "#4083D6",
+          "#63A7FD",
+          "#A6CCFD",
+          "#E5F0FE"
+        ]
+      },
+      "savoy-blue-hover": {
+        "role": "secondary",
+        "displayName": "Savoy Blue Hover",
+        "canonical": "#2B74C7",
+        "tonalRamp": [
+          "#000B1F",
+          "#01254B",
+          "#08417D",
+          "#1361B2",
+          "#3B83D8",
+          "#5FA8FF",
+          "#A5CCFE",
+          "#E4F0FF"
+        ]
+      },
+      "savoy-blue-pressed": {
+        "role": "secondary",
+        "displayName": "Savoy Blue Pressed",
+        "canonical": "#1A5498",
+        "tonalRamp": [
+          "#000B20",
+          "#02244C",
+          "#0A417D",
+          "#2961A7",
+          "#4B84CC",
+          "#6DA8F2",
+          "#A5CCFF",
+          "#E4F0FF"
+        ]
+      },
+      "savoy-ink": {
+        "role": "secondary",
+        "displayName": "Savoy Ink",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "band-ink": {
+        "role": "primary",
+        "displayName": "Band Ink",
+        "canonical": "#F2EFE8",
+        "tonalRamp": [
+          "#0D0B07",
+          "#272520",
+          "#44423C",
+          "#64615B",
+          "#85827C",
+          "#A8A59E",
+          "#CCC9C2",
+          "#F1EEE7"
+        ]
+      },
+      "band-ink-muted": {
+        "role": "primary",
+        "displayName": "Band Ink Muted",
+        "canonical": "#B5D0C2",
+        "tonalRamp": [
+          "#000F07",
+          "#142A20",
+          "#31483D",
+          "#4F685C",
+          "#70897C",
+          "#92AC9F",
+          "#B6D1C3",
+          "#DBF6E8"
+        ]
+      },
+      "band-ink-disabled": {
+        "role": "primary",
+        "displayName": "Band Ink Disabled",
+        "canonical": "#8FAF9F",
+        "tonalRamp": [
+          "#000F07",
+          "#0F2B1F",
+          "#2C493C",
+          "#4B695B",
+          "#6C8B7B",
+          "#8EAE9E",
+          "#B1D2C2",
+          "#D6F8E7"
+        ]
+      },
+      "band-rule": {
+        "role": "primary",
+        "displayName": "Band Rule",
+        "canonical": "#2F7458",
+        "tonalRamp": [
+          "#000F08",
+          "#012D1E",
+          "#094E37",
+          "#2B7054",
+          "#4E9275",
+          "#72B697",
+          "#96DBBB",
+          "#C3FEE2"
+        ]
+      },
+      "graphite-canvas": {
+        "role": "neutral",
+        "displayName": "Graphite Canvas",
+        "canonical": "#161A17",
+        "tonalRamp": [
+          "#090C09",
+          "#222623",
+          "#3F4340",
+          "#5E635F",
+          "#7F8480",
+          "#A1A7A2",
+          "#C5CBC6",
+          "#EAF0EC"
+        ]
+      },
+      "graphite-panel": {
+        "role": "neutral",
+        "displayName": "Graphite Panel",
+        "canonical": "#1D211E",
+        "tonalRamp": [
+          "#090C0A",
+          "#222623",
+          "#3F4340",
+          "#5E635F",
+          "#7F8480",
+          "#A1A7A3",
+          "#C5CBC7",
+          "#EBF0EC"
+        ]
+      },
+      "graphite-seam": {
+        "role": "neutral",
+        "displayName": "Graphite Seam",
+        "canonical": "#111412",
+        "tonalRamp": [
+          "#090C0A",
+          "#232624",
+          "#3F4341",
+          "#5E6260",
+          "#7F8381",
+          "#A2A6A3",
+          "#C6CAC7",
+          "#EBF0ED"
+        ]
+      },
+      "graphite-rule": {
+        "role": "neutral",
+        "displayName": "Graphite Rule",
+        "canonical": "#272C28",
+        "tonalRamp": [
+          "#080C09",
+          "#222723",
+          "#3E443F",
+          "#5D635E",
+          "#7E847F",
+          "#A1A7A2",
+          "#C5CBC6",
+          "#EAF0EB"
+        ]
+      },
+      "graphite-hover": {
+        "role": "neutral",
+        "displayName": "Graphite Hover",
+        "canonical": "#2A302C",
+        "tonalRamp": [
+          "#080D09",
+          "#212723",
+          "#3D4440",
+          "#5C635F",
+          "#7D8480",
+          "#A0A7A2",
+          "#C4CBC6",
+          "#E9F1EB"
+        ]
+      },
+      "graphite-row-hover": {
+        "role": "neutral",
+        "displayName": "Graphite Row Hover",
+        "canonical": "#1F2420",
+        "tonalRamp": [
+          "#080C09",
+          "#212723",
+          "#3E443F",
+          "#5D635E",
+          "#7E847F",
+          "#A1A7A2",
+          "#C4CBC6",
+          "#EAF1EB"
+        ]
+      },
+      "selection": {
+        "role": "neutral",
+        "displayName": "Selection",
+        "canonical": "#213A31",
+        "tonalRamp": [
+          "#000F09",
+          "#122B22",
+          "#2F483F",
+          "#4E685E",
+          "#6E897F",
+          "#90ADA1",
+          "#B4D1C5",
+          "#D9F7EA"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#E9E6DF",
+        "tonalRamp": [
+          "#0D0B07",
+          "#272520",
+          "#44423C",
+          "#64615B",
+          "#85827C",
+          "#A8A59E",
+          "#CCC9C2",
+          "#F1EEE7"
+        ]
+      },
+      "ink-header": {
+        "role": "neutral",
+        "displayName": "Ink Header",
+        "canonical": "#B8BDB8",
+        "tonalRamp": [
+          "#090C09",
+          "#222622",
+          "#3F433F",
+          "#5E635E",
+          "#7F847F",
+          "#A2A7A2",
+          "#C6CBC6",
+          "#EBF0EB"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Ink Muted",
+        "canonical": "#8D938F",
+        "tonalRamp": [
+          "#080C0A",
+          "#222623",
+          "#3E4340",
+          "#5D635F",
+          "#7E8480",
+          "#A1A7A3",
+          "#C5CBC7",
+          "#EAF0EC"
+        ]
+      },
+      "status-teal": {
+        "role": "tertiary",
+        "displayName": "Status Teal",
+        "canonical": "#3DB9AE",
+        "tonalRamp": [
+          "#000F0D",
+          "#042C28",
+          "#014D48",
+          "#087069",
+          "#1E958C",
+          "#3FBBB0",
+          "#6AE0D4",
+          "#B7FFF6"
+        ]
+      },
+      "status-vermilion": {
+        "role": "tertiary",
+        "displayName": "Status Vermilion",
+        "canonical": "#F2713C",
+        "tonalRamp": [
+          "#1A0400",
+          "#421503",
+          "#712602",
+          "#A23C08",
+          "#D3551A",
+          "#FC7A45",
+          "#FCB69C",
+          "#FEE9E2"
+        ]
+      },
+      "status-saffron": {
+        "role": "tertiary",
+        "displayName": "Status Saffron",
+        "canonical": "#E5B54A",
+        "tonalRamp": [
+          "#110A00",
+          "#312200",
+          "#543E05",
+          "#7B5C0E",
+          "#A57B05",
+          "#CC9D2C",
+          "#F2C158",
+          "#FEEDCA"
+        ]
+      },
+      "status-violet": {
+        "role": "tertiary",
+        "displayName": "Status Violet",
+        "canonical": "#9B8CE8",
+        "tonalRamp": [
+          "#0D012A",
+          "#290B5F",
+          "#442F82",
+          "#6250A6",
+          "#8272CC",
+          "#A495F2",
+          "#C8C1FB",
+          "#EEECFF"
+        ]
+      },
+      "tag-red": {
+        "role": "tertiary",
+        "displayName": "Tag Red",
+        "canonical": "#EF5B5B",
+        "tonalRamp": [
+          "#1F0001",
+          "#4B030A",
+          "#7D0E19",
+          "#B21B29",
+          "#DA484A",
+          "#FD7471",
+          "#FDB3AE",
+          "#FFE8E7"
+        ]
+      },
+      "tag-orange": {
+        "role": "tertiary",
+        "displayName": "Tag Orange",
+        "canonical": "#F59E42",
+        "tonalRamp": [
+          "#150800",
+          "#381E01",
+          "#603706",
+          "#8A5210",
+          "#B96E0A",
+          "#E48E2F",
+          "#FEB978",
+          "#FFEAD8"
+        ]
+      },
+      "tag-yellow": {
+        "role": "tertiary",
+        "displayName": "Tag Yellow",
+        "canonical": "#F2CC4B",
+        "tonalRamp": [
+          "#100B00",
+          "#2E2403",
+          "#504002",
+          "#755F08",
+          "#9B7F1B",
+          "#C3A227",
+          "#EBC643",
+          "#FEEEBE"
+        ]
+      },
+      "tag-green": {
+        "role": "tertiary",
+        "displayName": "Tag Green",
+        "canonical": "#5BC97A",
+        "tonalRamp": [
+          "#001003",
+          "#002E11",
+          "#055023",
+          "#0F7537",
+          "#239B4F",
+          "#50BF71",
+          "#77E594",
+          "#CAFED4"
+        ]
+      },
+      "tag-cyan": {
+        "role": "tertiary",
+        "displayName": "Tag Cyan",
+        "canonical": "#4FC3E8",
+        "tonalRamp": [
+          "#000E14",
+          "#032A35",
+          "#014A5D",
+          "#066C86",
+          "#1C90B0",
+          "#3EB5D9",
+          "#73D9FB",
+          "#D8F4FF"
+        ]
+      },
+      "tag-blue": {
+        "role": "tertiary",
+        "displayName": "Tag Blue",
+        "canonical": "#5B8DEF",
+        "tonalRamp": [
+          "#000729",
+          "#011D5F",
+          "#0D3893",
+          "#2D5BB8",
+          "#4D7EDF",
+          "#73A3FF",
+          "#ADCAFE",
+          "#E6EFFE"
+        ]
+      },
+      "tag-purple": {
+        "role": "tertiary",
+        "displayName": "Tag Purple",
+        "canonical": "#9B6BEF",
+        "tonalRamp": [
+          "#100126",
+          "#30045D",
+          "#521098",
+          "#713CBD",
+          "#9261E4",
+          "#B18CFD",
+          "#CFBDFD",
+          "#F0EBFE"
+        ]
+      },
+      "tag-pink": {
+        "role": "tertiary",
+        "displayName": "Tag Pink",
+        "canonical": "#EF6BC4",
+        "tonalRamp": [
+          "#1B0013",
+          "#440533",
+          "#750359",
+          "#A21F7F",
+          "#C948A2",
+          "#F16DC6",
+          "#FDABDE",
+          "#FEE7F4"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel titles and the app name in the title bar."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Tree rows, toolbar labels, empty states, form text."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Form field labels."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Status bar, result tab strip, counts, versions, band meta."
+      },
+      "data-mono": {
+        "displayName": "Data Mono",
+        "purpose": "Result grid cells."
+      },
+      "editor-mono": {
+        "displayName": "Editor Mono",
+        "purpose": "The SQL editor."
+      }
+    },
+    "shadows": [
+      {
+        "name": "overlay",
+        "value": "GPUI Kit default shadow",
+        "purpose": "Dialogs, menus, popovers and notifications only; docked surfaces and band/Run buttons are flat."
+      }
+    ],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action on a graphite surface, such as New data source.",
+      "html": "<button class=\"ds-btn-primary\">New data source</button>",
+      "css": ".ds-btn-primary { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; background: #1F5A43; color: #F2EFE8; border: none; border-radius: 6px; padding: 4px 12px; font-size: 14px; font-weight: 500; cursor: pointer; } .ds-btn-primary:hover { background: #286C51; } .ds-btn-primary:active { background: #184634; } .ds-btn-primary:focus-visible { outline: 2px solid #5FB088; outline-offset: 1px; }"
+    },
+    {
+      "name": "Run Button",
+      "kind": "button",
+      "refersTo": "button-run",
+      "description": "The window's one Savoy-blue control, first on the console band.",
+      "html": "<button class=\"ds-btn-run\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polygon points=\"6 3 20 12 6 21 6 3\"/></svg>Run</button>",
+      "css": ".ds-btn-run { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; display: inline-flex; align-items: center; gap: 4px; background: #1F64B4; color: #FFFFFF; border: none; border-radius: 6px; padding: 4px 10px; font-size: 14px; cursor: pointer; } .ds-btn-run:hover { background: #2B74C7; } .ds-btn-run:active { background: #1A5498; } .ds-btn-run:focus-visible { outline: 2px solid #5FB088; outline-offset: 1px; }"
+    },
+    {
+      "name": "Band Tool Button",
+      "kind": "button",
+      "refersTo": "button-band",
+      "description": "Ghost-like tool on an Ivrea band; disabled keeps legible band ink.",
+      "html": "<span class=\"ds-band-demo\"><button class=\"ds-btn-band\">Explain</button><button class=\"ds-btn-band\" disabled>Tx: Auto</button></span>",
+      "css": ".ds-band-demo { display: inline-flex; gap: 2px; background: #1F5A43; padding: 4px 8px; } .ds-btn-band { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; background: #1F5A43; color: #F2EFE8; border: none; border-radius: 6px; padding: 4px 8px; font-size: 14px; cursor: pointer; } .ds-btn-band:hover { background: #286C51; } .ds-btn-band:active { background: #184634; } .ds-btn-band:focus-visible { outline: 2px solid #5FB088; } .ds-btn-band:disabled { color: #8FAF9F; cursor: default; background: #1F5A43; }"
+    },
+    {
+      "name": "Console Tool Band",
+      "kind": "custom",
+      "refersTo": "tool-band",
+      "description": "34px Ivrea-green band naming the console zone: Run first, hairline separators, schema at the right.",
+      "html": "<div class=\"ds-band\"><button class=\"ds-band-run\">Run</button><span class=\"ds-band-sep\"></span><button class=\"ds-band-tool\">Tx: Auto</button><span class=\"ds-band-sep\"></span><button class=\"ds-band-tool\">Explain</button><span class=\"ds-band-fill\"></span><span class=\"ds-band-meta\">savoia.public</span></div>",
+      "css": ".ds-band { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 8px; background: #1F5A43; color: #F2EFE8; font-size: 14px; width: 520px; } .ds-band-run { background: #1F64B4; color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; } .ds-band-run:hover { background: #2B74C7; } .ds-band-tool { background: transparent; color: #F2EFE8; border: none; border-radius: 6px; padding: 4px 8px; font: inherit; cursor: pointer; } .ds-band-tool:hover { background: #286C51; } .ds-band-tool:focus-visible, .ds-band-run:focus-visible { outline: 2px solid #5FB088; } .ds-band-sep { width: 1px; height: 16px; margin: 0 4px; background: #2F7458; } .ds-band-fill { flex: 1; } .ds-band-meta { font-size: 12px; color: #B5D0C2; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "description": "Connection form field: 12px medium label over a hairline-stroked graphite input.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Host</span><input class=\"ds-input\" value=\"localhost\"></label>",
+      "css": ".ds-field { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; display: flex; flex-direction: column; gap: 4px; width: 260px; background: #161A17; padding: 8px; } .ds-field-label { font-size: 12px; font-weight: 500; color: #E9E6DF; } .ds-input { font: inherit; font-size: 14px; color: #E9E6DF; background: #161A17; border: 1px solid #272C28; border-radius: 6px; padding: 4px 8px; caret-color: #5FB088; } .ds-input:hover { border-color: #2A302C; } .ds-input:focus-visible { outline: 2px solid #5FB088; outline-offset: 0; }"
+    },
+    {
+      "name": "Console Tabs",
+      "kind": "nav",
+      "description": "Underline tab bar on graphite; the tab icon carries the connection tag color.",
+      "html": "<div class=\"ds-tabs\"><span class=\"ds-tab ds-tab-active\"><span class=\"ds-tab-dot\" style=\"background:#EF5B5B\"></span>console [prod]</span><span class=\"ds-tab\">console [local]</span></div>",
+      "css": ".ds-tabs { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; display: flex; height: 36px; background: #161A17; border-bottom: 1px solid #272C28; font-size: 14px; } .ds-tab { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; color: #8D938F; cursor: pointer; border-bottom: 2px solid transparent; } .ds-tab:hover { color: #E9E6DF; } .ds-tab-active { color: #E9E6DF; border-bottom-color: #1F5A43; } .ds-tab-dot { width: 8px; height: 8px; border-radius: 9999px; }"
+    },
+    {
+      "name": "Explorer Tree Row",
+      "kind": "custom",
+      "refersTo": "tree-row",
+      "description": "Data-source row: tag-colored icon, label, teal connected dot, muted version.",
+      "html": "<div class=\"ds-tree\"><div class=\"ds-row\"><span class=\"ds-src\" style=\"background:#5BC97A\"></span>local-pg<span class=\"ds-ok\"></span><span class=\"ds-meta\">16.4</span></div><div class=\"ds-row ds-row-sel\" style=\"padding-left:20px\">public<span class=\"ds-meta\">12</span></div><div class=\"ds-row\"><span class=\"ds-src\" style=\"background:#EF5B5B\"></span>prod<span class=\"ds-fail\"></span></div></div>",
+      "css": ".ds-tree { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; width: 260px; background: #1D211E; padding: 4px 0; font-size: 14px; color: #E9E6DF; } .ds-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px; cursor: pointer; } .ds-row:hover { background: #2A302C; } .ds-row-sel { background: #213A31; } .ds-src { width: 12px; height: 12px; border-radius: 3px; } .ds-ok, .ds-fail { width: 6px; height: 6px; border-radius: 9999px; background: #3DB9AE; } .ds-fail { background: #F2713C; } .ds-meta { font-size: 12px; color: #8D938F; }"
+    },
+    {
+      "name": "Result Grid",
+      "kind": "card",
+      "description": "Borderless monospace grid: panel header, hairline rows, Ivrea Line active cell.",
+      "html": "<table class=\"ds-grid\"><thead><tr><th>#</th><th>table_name</th><th>rows</th></tr></thead><tbody><tr><td class=\"ds-num\">1</td><td>users</td><td class=\"ds-r\">1204</td></tr><tr><td class=\"ds-num\">2</td><td class=\"ds-active\">orders</td><td class=\"ds-r\">88310</td></tr></tbody></table>",
+      "css": ".ds-grid { border-collapse: collapse; background: #161A17; color: #E9E6DF; font-family: ui-monospace, monospace; font-size: 14px; width: 360px; } .ds-grid th { background: #1D211E; color: #B8BDB8; font-family: system-ui, sans-serif; font-weight: 500; font-size: 12px; text-align: left; padding: 4px 8px; } .ds-grid td { padding: 4px 8px; border-bottom: 1px solid #272C28; } .ds-grid tr:hover td { background: #1F2420; } .ds-num { color: #8D938F; text-align: right; width: 44px; } .ds-r { text-align: right; } .ds-active { outline: 1px solid #5FB088; outline-offset: -1px; background: #213A31; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Olivetti, Ivrea",
+    "overview": "**Creative North Star: \"Olivetti, Ivrea\"**\n\nItalian computing modernism from Savoy Piedmont, set inside a working IDE. The ground is graphite with a faint green cast; flat, solid fields of Ivrea green name each zone of work, the way an Olivetti machine named its functions with color rather than ornament. The layout is the familiar DataGrip arrangement, so the developer always knows where things are; the color tells them which zone they are in.\n\nThe mood is quiet. Density is IDE-grade, but the chrome is a few flat planes and hairline rules, nothing more. One Savoy-blue control (Run) is the window's only accent. Status speaks in its own hues (teal, vermilion-orange, saffron, violet) so it is never mistaken for brand, and red is held back for danger alone.\n\nConfirmed rejections: DBeaver/Eclipse clutter, Electron SaaS gloss, and neon terminal cosplay.",
+    "keyCharacteristics": [
+      "Graphite ground with a green cast; docked surfaces flat, separated by darker seams and hairline rules.",
+      "Solid Ivrea-green tool bands (34px) carrying paper-white ink, aligned across the panel seam.",
+      "One filled Savoy-blue control: Run.",
+      "A lifted green (Ivrea Line) draws every focus and active line.",
+      "Status hues of their own; red only ever means danger.",
+      "System sans for the shell, monospace for SQL and data."
+    ],
+    "rules": [
+      {
+        "name": "The Run-Only Blue Rule",
+        "body": "Savoy blue fills Run and nothing else in the window. The title-bar mark omits the app icon's blue dot to keep it that way.",
+        "section": "colors"
+      },
+      {
+        "name": "The Red Means Danger Rule",
+        "body": "Brand surfaces never use red. Errors and failures use vermilion-orange, and no status hue reuses Ivrea green or Savoy blue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Lifted Line Rule",
+        "body": "Deep Ivrea green is a fill, never a 1px stroke. Any green line on graphite uses Ivrea Line.",
+        "section": "colors"
+      },
+      {
+        "name": "The Band Ink Rule",
+        "body": "Anything on a band uses band ink. Disabled controls on a band take Band Ink Disabled, never the toolkit's graphite-tuned disabled ink, which vanishes on green.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Registers Rule",
+        "body": "Sans for the shell, monospace for SQL and data. Never set chrome in mono or data in sans.",
+        "section": "typography"
+      },
+      {
+        "name": "The Docked-Is-Flat Rule",
+        "body": "If it is docked into the window, it has no shadow. Only floating surfaces lift.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Square Bars Rule",
+        "body": "Structural bars never round; radius belongs to the controls placed on them.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do take every color from `theme.rs`: the GPUI Kit slots set in `edit`, or the brand constants.",
+      "Do name a working zone with a solid 34px Ivrea-green band, aligned with its neighbor across the panel seam.",
+      "Do draw every green line (focus, caret, active cell, active tab) in Ivrea Line.",
+      "Do use violet for info, teal for success, saffron for warning, vermilion-orange for errors.",
+      "Do carry the connection's tag color onto its explorer icon and console tab.",
+      "Do keep docked surfaces flat and let only overlays cast a shadow."
+    ],
+    "donts": [
+      "Don't use Savoy blue on anything but Run, and don't add a second blue control.",
+      "Don't use red for brand or decoration; red only ever means danger.",
+      "Don't use deep Ivrea green as a 1px stroke on graphite.",
+      "Don't put toolkit-default disabled ink on a green band.",
+      "Don't drift toward DBeaver/Eclipse clutter, Electron SaaS gloss, or neon terminal cosplay."
+    ]
+  }
+}

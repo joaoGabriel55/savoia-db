@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/quaresma/savoia-db"
+
+[workspace.dependencies]
+savoia-core = { path = "crates/savoia-core" }
+savoia-mysql = { path = "crates/savoia-mysql" }
+savoia-pg = { path = "crates/savoia-pg" }
+savoia-store = { path = "crates/savoia-store" }
+savoia-tunnel = { path = "crates/savoia-tunnel" }
+async-trait = "0.1.92"
+serde_json = "1"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+url = "2.5"
+uuid = { version = "1.27", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+gpui-kit = { version = "=0.7.1", features = ["tree-sitter-sql"] }
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

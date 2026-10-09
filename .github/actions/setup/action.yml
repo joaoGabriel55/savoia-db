@@ -1,0 +1,15 @@
+name: Setup toolchains
+description: Rust toolchain, Linux GPUI system libraries and cargo cache.
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+          libvulkan-dev libfontconfig-dev libx11-xcb-dev libssl-dev
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2

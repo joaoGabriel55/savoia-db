@@ -1,0 +1,18 @@
+[package]
+name = "savoia-mysql"
+description = "MySQL / MariaDB driver for Savoia DB (mysql_async)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+savoia-core.workspace = true
+tokio.workspace = true
+mysql_async = { version = "0.37.1", default-features = false, features = ["default-rustls-ring"] }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

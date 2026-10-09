@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "adr-setup": {
+      "source": "codeminer42/skills",
+      "sourceType": "github",
+      "skillPath": "adr-setup/SKILL.md",
+      "computedHash": "1e482c8ec813d6834c9fd4eb9bc17df81d348edbc573f439e8d554427da68efe"
+    }
+  }
+}

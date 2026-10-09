@@ -1,0 +1,15 @@
+target/
+.DS_Store
+*.log
+.env
+
+# Local-only agent and design-tool state
+.claude/settings.local.json
+.impeccable/config.local.json
+.impeccable/review/
+.impeccable/questions/
+
+# Impeccable's launcher downloads its binary on first run
+.claude/skills/impeccable/scripts/bin/
+.agents/skills/impeccable/scripts/bin/
+.github/skills/impeccable/scripts/bin/
