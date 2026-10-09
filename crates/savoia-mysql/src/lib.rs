@@ -1,16 +1,18 @@
 //! MySQL / MariaDB driver built on `mysql_async`. Must run inside a Tokio runtime.
 
+mod execute;
+
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
-use mysql_async::{
-    Conn, DriverError, Error as MyError, OptsBuilder, Pool, PoolConstraints, PoolOpts, SslOpts,
-};
+use mysql_async::{Conn, DriverError, Error as MyError, Opts, OptsBuilder, SslOpts};
 use savoia_core::{
     AppError, AppResult, Catalog, Connection, DatabaseNode, Driver, Endpoint, Engine, QueryHandle,
     SchemaNode, SchemaObjects, Secrets, ServerInfo, SslMode,
 };
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// MySQL server error codes that mean the credentials were rejected.
@@ -30,27 +32,12 @@ impl Driver for MysqlDriver {
         secrets: &Secrets,
     ) -> AppResult<Box<dyn Connection>> {
         let attempt = |tls: Option<SslOpts>| async move {
-            let pool = Pool::new(opts(endpoint, secrets, tls));
-            // The pool is lazy; take one connection now so errors surface here.
-            let conn = tokio::time::timeout(CONNECT_TIMEOUT, pool.get_conn())
-                .await
-                .map_err(|_| {
-                    AppError::connect(format!("timed out after {}s", CONNECT_TIMEOUT.as_secs()))
-                })?
-                .map_err(map_error);
-            match conn {
-                Ok(conn) => {
-                    drop(conn);
-                    Ok(pool)
-                }
-                Err(err) => {
-                    drop(pool.disconnect().await);
-                    Err(err)
-                }
-            }
+            let opts = Opts::from(opts(endpoint, secrets, tls));
+            let conn = connect_once(opts.clone()).await?;
+            Ok::<_, AppError>((conn, opts))
         };
 
-        let pool = match endpoint.ssl {
+        let (conn, opts) = match endpoint.ssl {
             SslMode::Disable => attempt(None).await?,
             SslMode::Prefer => match attempt(Some(ssl_opts(endpoint, false))).await {
                 Err(AppError::Connect { message }) if message.contains(NO_SERVER_TLS) => {
@@ -61,8 +48,19 @@ impl Driver for MysqlDriver {
             SslMode::Require => attempt(Some(ssl_opts(endpoint, false))).await?,
             SslMode::VerifyFull => attempt(Some(ssl_opts(endpoint, true))).await?,
         };
-        Ok(Box::new(MysqlConnection { pool }))
+        Ok(Box::new(MysqlConnection {
+            conn: Arc::new(Mutex::new(Some(conn))),
+            opts,
+        }))
     }
+}
+
+/// Opens one connection, giving up after `CONNECT_TIMEOUT`.
+async fn connect_once(opts: Opts) -> AppResult<Conn> {
+    tokio::time::timeout(CONNECT_TIMEOUT, Conn::new(opts))
+        .await
+        .map_err(|_| AppError::connect(format!("timed out after {}s", CONNECT_TIMEOUT.as_secs())))?
+        .map_err(map_error)
 }
 
 /// Substring of the driver error when the server can't do TLS (used by Prefer).
@@ -81,9 +79,6 @@ fn opts(endpoint: &Endpoint, secrets: &Secrets, tls: Option<SslOpts>) -> OptsBui
         .db_name(endpoint.database.clone())
         .prefer_socket(false)
         .init(init)
-        .pool_opts(
-            PoolOpts::default().with_constraints(PoolConstraints::new(0, 4).expect("0 <= 4")),
-        )
         .ssl_opts(tls)
 }
 
@@ -127,39 +122,60 @@ fn query_error(err: MyError) -> AppError {
     }
 }
 
+/// One server connection; all work on it takes turns through the mutex. See
+/// `docs/adr/202610091309-serialize-all-work-on-one-connection-per-session.md`.
 pub struct MysqlConnection {
-    pool: Pool,
+    /// `None` once closed.
+    conn: Arc<Mutex<Option<Conn>>>,
+    /// How `conn` was opened; cancel requests connect the same way.
+    opts: Opts,
 }
 
 impl MysqlConnection {
-    async fn conn(&self) -> AppResult<Conn> {
-        self.pool.get_conn().await.map_err(map_error)
+    /// Waits for the connection to be free and takes it.
+    async fn lock(&self) -> AppResult<OwnedMutexGuard<Option<Conn>>> {
+        let guard = self.conn.clone().lock_owned().await;
+        match *guard {
+            Some(_) => Ok(guard),
+            None => Err(AppError::query("the connection is closed")),
+        }
     }
+}
+
+/// The locked connection. Only for guards from `MysqlConnection::lock`.
+fn live(guard: &mut Option<Conn>) -> &mut Conn {
+    guard
+        .as_mut()
+        .expect("lock() checks the connection is open")
+}
+
+async fn server_info(conn: &mut Conn) -> AppResult<ServerInfo> {
+    let version: Option<String> = conn
+        .query_first("SELECT VERSION()")
+        .await
+        .map_err(query_error)?;
+    let version = version.unwrap_or_default();
+    let product = if version.contains("MariaDB") {
+        "MariaDB"
+    } else {
+        "MySQL"
+    };
+    let short = version.split('-').next().unwrap_or(&version);
+    Ok(ServerInfo {
+        version: format!("{product} {short}"),
+    })
 }
 
 #[async_trait]
 impl Connection for MysqlConnection {
     async fn server_info(&self) -> AppResult<ServerInfo> {
-        let mut conn = self.conn().await?;
-        let version: Option<String> = conn
-            .query_first("SELECT VERSION()")
-            .await
-            .map_err(query_error)?;
-        let version = version.unwrap_or_default();
-        let product = if version.contains("MariaDB") {
-            "MariaDB"
-        } else {
-            "MySQL"
-        };
-        let short = version.split('-').next().unwrap_or(&version);
-        Ok(ServerInfo {
-            version: format!("{product} {short}"),
-        })
+        server_info(live(&mut *self.lock().await?)).await
     }
 
     async fn catalog(&self) -> AppResult<Catalog> {
-        let server = self.server_info().await?;
-        let mut conn = self.conn().await?;
+        let mut guard = self.lock().await?;
+        let conn = live(&mut guard);
+        let server = server_info(conn).await?;
         let current: Option<String> = conn
             .query_first::<Option<String>, _>("SELECT DATABASE()")
             .await
@@ -172,7 +188,7 @@ impl Connection for MysqlConnection {
             let is_current = current.as_deref() == Some(name.as_str());
             let schemas = if is_current {
                 vec![SchemaNode {
-                    objects: objects(&mut conn, &name).await?,
+                    objects: objects(conn, &name).await?,
                     name: name.clone(),
                 }]
             } else {
@@ -187,15 +203,15 @@ impl Connection for MysqlConnection {
         Ok(Catalog { server, databases })
     }
 
-    async fn execute(&self, _sql: String) -> AppResult<QueryHandle> {
-        // Replaced by the streaming implementation in the next commit.
-        Err(AppError::query(
-            "query execution is not implemented yet for MySQL",
-        ))
+    async fn execute(&self, sql: String) -> AppResult<QueryHandle> {
+        let guard = self.lock().await?;
+        Ok(execute::execute(guard, self.opts.clone(), sql))
     }
 
     async fn close(&self) {
-        drop(self.pool.clone().disconnect().await);
+        if let Some(conn) = self.conn.lock().await.take() {
+            drop(conn.disconnect().await);
+        }
     }
 }
 
