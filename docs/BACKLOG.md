@@ -14,7 +14,7 @@ Already shipped: lazy schema tree with counts, ER diagrams, streamed execute, ca
 | # | Task | Where | Done when | Est. |
 |---|------|-------|-----------|------|
 | 2.1 | [x] Multiple console tabs | `workspace.rs`, `console.rs` | "New console" opens another tab bound to a session; each tab keeps its own editor text and results; closing a tab cancels its running query. | ½ day |
-| 2.2 | [ ] Run the statement under the cursor | `console.rs` (+ a splitter in `savoia-core`) | With no selection, Run executes only the statement around the caret. Today it runs the selection or the whole editor. The splitter is reused by M4 import. | 1 day |
+| 2.2 | [x] Run the statement under the cursor | `console.rs` (+ a splitter in `savoia-core`) | With no selection, Run executes only the statement around the caret. Today it runs the selection or the whole editor. The splitter is reused by M4 import. | 1 day |
 | 2.3 | [ ] Copy and export results | `results.rs` | Copy selected cells/rows as TSV, CSV, JSON or INSERT; "Export…" writes the whole result to CSV. NULL and empty string stay distinct. | 1 day |
 | 2.4 | [ ] Sort and filter in the result grid | `results.rs` | Click a header to sort the loaded rows; a quick filter hides non-matching rows. | ½ day |
 | 2.5 | [ ] Query history | `savoia-store` (new migration), `console.rs` | Every run is saved with connection, time, duration and row count; a searchable panel re-opens a query in the console. | 1–1½ days |

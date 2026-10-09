@@ -1,7 +1,8 @@
 //! Query console: toolbar, SQL editor and the output/result panes below it.
 //!
-//! Run sends the selection (or the whole editor) to the console's data
-//! source: the one it was opened on, else the one selected in the explorer
+//! Run sends the selection, else the statement at the caret, to the
+//! console's data source; Run script sends the whole editor. The data
+//! source is the one the console was opened on, else the one selected in the explorer
 //! at its first run. A reader task moves the query's events into the grid, pausing
 //! while the grid has enough rows (see [`Pacer`]).
 
@@ -20,7 +21,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use savoia_core::{AppError, ConnectionId, QueryEvent};
+use savoia_core::{AppError, ConnectionId, Engine, QueryEvent, split};
 
 use crate::data_sources::{DataSources, SourceState};
 use crate::explorer::Explorer;
@@ -29,7 +30,7 @@ use crate::session::{self, Session};
 use crate::theme::BandDisabled as _;
 use crate::{runtime, theme};
 
-actions!(console, [RunQuery]);
+actions!(console, [RunQuery, RunScript]);
 
 const CONTEXT: &str = "QueryConsole";
 
@@ -40,6 +41,12 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(
             "secondary-enter",
             RunQuery,
+            Some(&format!("{CONTEXT} > Input")),
+        ),
+        KeyBinding::new("secondary-shift-enter", RunScript, Some(CONTEXT)),
+        KeyBinding::new(
+            "secondary-shift-enter",
+            RunScript,
             Some(&format!("{CONTEXT} > Input")),
         ),
     ]);
@@ -192,18 +199,32 @@ impl QueryConsole {
         cx.notify();
     }
 
-    fn sql(&self, cx: &App) -> String {
+    /// What a run sends: the selection if there is one, else the whole
+    /// editor (`script`) or the statement at the caret.
+    fn sql(&self, engine: Engine, script: bool, cx: &App) -> String {
         let editor = self.editor.read(cx);
         let selected = editor.selected_value();
-        let sql = if selected.trim().is_empty() {
-            editor.value()
-        } else {
-            selected
-        };
-        sql.to_string()
+        if !selected.trim().is_empty() {
+            return selected.to_string();
+        }
+        let text = editor.value();
+        if script {
+            return split::script(&text, engine);
+        }
+        split::statement_at(&text, engine, editor.cursor())
+            .map(|range| text[range].to_owned())
+            .unwrap_or_default()
     }
 
     pub(crate) fn run(&mut self, _: &RunQuery, window: &mut Window, cx: &mut Context<Self>) {
+        self.start(false, window, cx);
+    }
+
+    fn run_script(&mut self, _: &RunScript, window: &mut Window, cx: &mut Context<Self>) {
+        self.start(true, window, cx);
+    }
+
+    fn start(&mut self, script: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.running.is_some() {
             return;
         }
@@ -214,7 +235,10 @@ impl QueryConsole {
                 return;
             }
         };
-        let sql = self.sql(cx);
+        let Some(engine) = self.data_sources.read(cx).get(id).map(|c| c.engine) else {
+            return;
+        };
+        let sql = self.sql(engine, script, cx);
         if sql.trim().is_empty() {
             return;
         }
@@ -453,9 +477,18 @@ impl QueryConsole {
                     .small()
                     .icon(Icon::new(IconName::Play))
                     .label("Run")
-                    .tooltip("Execute (⌘↩)")
+                    .tooltip("Run the statement at the caret, or the selection (⌘↩)")
                     .disabled(running)
                     .on_click(cx.listener(|this, _, window, cx| this.run(&RunQuery, window, cx))),
+            )
+            .child(
+                tool("run-script")
+                    .icon(Icon::new(Lucide::ListVideo))
+                    .tooltip("Run the whole script (⇧⌘↩)")
+                    .band_disabled(running)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.run_script(&RunScript, window, cx)),
+                    ),
             )
             .child(
                 tool("cancel")
@@ -641,6 +674,7 @@ impl Render for QueryConsole {
         v_flex()
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::run))
+            .on_action(cx.listener(Self::run_script))
             .size_full()
             .child(self.render_toolbar(cx))
             .child(

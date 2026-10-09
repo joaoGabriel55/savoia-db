@@ -7,6 +7,7 @@ mod driver;
 mod engine;
 mod error;
 mod query;
+pub mod split;
 
 pub use catalog::{
     Catalog, ColumnInfo, DatabaseNode, ForeignKey, IndexInfo, ObjectCounts, SchemaNode,

@@ -160,7 +160,7 @@ fn console_on(
     (ds, console, window)
 }
 
-/// Types `sql` into the console and clicks Run.
+/// Types `sql` into the console and clicks Run script.
 fn run(
     cx: &mut TestAppContext,
     window: AnyWindowHandle,
@@ -176,7 +176,7 @@ fn run(
             .update(cx, |editor, cx| editor.set_value(sql, window, cx));
     })
     .unwrap();
-    click(cx, window, "run");
+    click(cx, window, "run-script");
 }
 
 /// Row count and first row of result `ix` (negative: from the end).
@@ -867,4 +867,35 @@ async fn postgres_console_tabs_are_independent(cx: &mut TestAppContext) {
     let [first] = consoles(cx).try_into().expect("one console");
     let text = first.read_with(cx, |c, cx| c.editor().read(cx).value().to_string());
     assert_eq!(text, "SELECT 1");
+}
+
+/// Run takes the statement at the caret; a selection wins over it.
+#[gpui_kit::test]
+async fn postgres_run_takes_the_statement_at_the_caret(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    let sql = "SELECT 1 AS one;\nSELECT 2 AS two;\nSELECT 3 AS three;";
+    let run_at = |cx: &mut TestAppContext, range: std::ops::Range<usize>| {
+        cx.update_window(window, |_, window, cx| {
+            console.update(cx, |c, cx| {
+                c.editor().clone().update(cx, |editor, cx| {
+                    editor.set_value(sql, window, cx);
+                    editor.set_selected_range(range, cx);
+                });
+                c.run(&crate::console::RunQuery, window, cx);
+            })
+        })
+        .unwrap();
+        wait_until(cx, "the run", |cx| {
+            !console.read_with(cx, |c, _| c.is_running())
+        });
+        let results = console.read_with(cx, |c, _| c.results().len());
+        (results, grid(cx, &console).1.last().cloned())
+    };
+    let caret = sql.find("2 AS").unwrap();
+    assert_eq!(run_at(cx, caret..caret), (1, Some("2".into())));
+    let three = sql.find("SELECT 3").unwrap();
+    assert_eq!(run_at(cx, three..sql.len()), (1, Some("3".into())));
 }
