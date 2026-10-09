@@ -6,6 +6,7 @@ mod connection;
 mod driver;
 mod engine;
 mod error;
+mod query;
 
 pub use catalog::{Catalog, DatabaseNode, SchemaNode, SchemaObjects, ServerInfo};
 pub use connection::{
@@ -15,3 +16,7 @@ pub use connection::{
 pub use driver::{Connection, Driver};
 pub use engine::Engine;
 pub use error::{AppError, AppResult};
+pub use query::{
+    Cancel, CancelHandle, Cell, Closed, ColumnMeta, PAGE_LATENCY, PAGE_ROWS, QueryEvent,
+    QueryHandle, QuerySender, Row, ValueKind,
+};

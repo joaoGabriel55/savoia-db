@@ -8,8 +8,8 @@ use mysql_async::{
     Conn, DriverError, Error as MyError, OptsBuilder, Pool, PoolConstraints, PoolOpts, SslOpts,
 };
 use savoia_core::{
-    AppError, AppResult, Catalog, Connection, DatabaseNode, Driver, Endpoint, Engine, SchemaNode,
-    SchemaObjects, Secrets, ServerInfo, SslMode,
+    AppError, AppResult, Catalog, Connection, DatabaseNode, Driver, Endpoint, Engine, QueryHandle,
+    SchemaNode, SchemaObjects, Secrets, ServerInfo, SslMode,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -185,6 +185,13 @@ impl Connection for MysqlConnection {
             });
         }
         Ok(Catalog { server, databases })
+    }
+
+    async fn execute(&self, _sql: String) -> AppResult<QueryHandle> {
+        // Replaced by the streaming implementation in the next commit.
+        Err(AppError::query(
+            "query execution is not implemented yet for MySQL",
+        ))
     }
 
     async fn close(&self) {

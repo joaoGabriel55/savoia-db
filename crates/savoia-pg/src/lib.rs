@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use savoia_core::{
-    AppError, AppResult, Catalog, Connection, DatabaseNode, Driver, Endpoint, Engine, SchemaNode,
-    SchemaObjects, Secrets, ServerInfo, SslMode,
+    AppError, AppResult, Catalog, Connection, DatabaseNode, Driver, Endpoint, Engine, QueryHandle,
+    SchemaNode, SchemaObjects, Secrets, ServerInfo, SslMode,
 };
 use tokio::task::JoinHandle;
 use tokio_postgres::{Client, Config, NoTls, config::SslMode as PgSslMode, error::SqlState};
@@ -214,6 +214,13 @@ impl Connection for PgConnection {
             })
             .collect();
         Ok(Catalog { server, databases })
+    }
+
+    async fn execute(&self, _sql: String) -> AppResult<QueryHandle> {
+        // Replaced by the streaming implementation in the next commit.
+        Err(AppError::query(
+            "query execution is not implemented yet for PostgreSQL",
+        ))
     }
 
     async fn close(&self) {
