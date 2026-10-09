@@ -1,5 +1,6 @@
 //! PostgreSQL driver built on `tokio-postgres`. Must run inside a Tokio runtime.
 
+mod execute;
 mod tls;
 
 use std::net::IpAddr;
@@ -42,7 +43,11 @@ impl Driver for PgDriver {
                 (client, tokio::spawn(async move { drop(conn.await) }))
             }
         };
-        Ok(Box::new(PgConnection { client, task }))
+        Ok(Box::new(PgConnection {
+            client,
+            ssl: endpoint.ssl,
+            task,
+        }))
     }
 }
 
@@ -111,6 +116,8 @@ fn query_error(err: tokio_postgres::Error) -> AppError {
 
 pub struct PgConnection {
     client: Client,
+    /// How the session connected; cancel requests connect the same way.
+    ssl: SslMode,
     task: JoinHandle<()>,
 }
 
@@ -216,11 +223,8 @@ impl Connection for PgConnection {
         Ok(Catalog { server, databases })
     }
 
-    async fn execute(&self, _sql: String) -> AppResult<QueryHandle> {
-        // Replaced by the streaming implementation in the next commit.
-        Err(AppError::query(
-            "query execution is not implemented yet for PostgreSQL",
-        ))
+    async fn execute(&self, sql: String) -> AppResult<QueryHandle> {
+        execute::execute(&self.client, self.ssl, sql).await
     }
 
     async fn close(&self) {
