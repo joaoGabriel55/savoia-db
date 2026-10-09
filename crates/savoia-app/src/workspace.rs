@@ -119,7 +119,7 @@ impl Render for Workspace {
                 format!(
                     "{} · {}{}",
                     c.display_name(),
-                    session.catalog.server.version,
+                    session.catalog().server.version,
                     if c.read_only { " · read-only" } else { "" }
                 ),
             ),

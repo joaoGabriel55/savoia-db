@@ -20,7 +20,7 @@ use savoia_core::{ConnectionConfig, ConnectionId, DatabaseNode, SchemaObjects};
 use savoia_tunnel::HostKeyPolicy;
 
 use crate::connection_form::ConnectionForm;
-use crate::data_sources::{DataSources, DataSourcesEvent, SourceState};
+use crate::data_sources::{DataSources, DataSourcesEvent, RefreshState, SourceState};
 use crate::theme::{self, BandDisabled as _};
 
 /// Per-source decoration for the tree rows.
@@ -33,7 +33,8 @@ struct SourceMeta {
 #[derive(Clone)]
 enum SourceStatus {
     Idle,
-    Connecting,
+    /// Connecting or refreshing; the text says which.
+    Pending(&'static str),
     Connected(SharedString),
     Failed,
 }
@@ -163,11 +164,17 @@ impl Explorer {
                 let source = TreeItem::new(format!("source:{}", config.id), config.display_name());
                 let status = match ds.state(config.id) {
                     SourceState::Disconnected => SourceStatus::Idle,
-                    SourceState::Connecting => SourceStatus::Connecting,
+                    SourceState::Connecting => SourceStatus::Pending("connecting…"),
                     SourceState::Failed(_) => SourceStatus::Failed,
-                    SourceState::Connected(session) => {
-                        SourceStatus::Connected(session.catalog.server.version.clone().into())
-                    }
+                    SourceState::Connected(session) => match ds.refresh_state(config.id) {
+                        Some(RefreshState::Waiting) => {
+                            SourceStatus::Pending("waiting for the running query…")
+                        }
+                        Some(RefreshState::Loading) => SourceStatus::Pending("refreshing…"),
+                        None => {
+                            SourceStatus::Connected(session.catalog().server.version.clone().into())
+                        }
+                    },
                 };
                 meta.insert(
                     config.id,
@@ -181,7 +188,7 @@ impl Explorer {
                         // Once per session, open the path to the current database
                         // and its default schema, like DataGrip does.
                         let auto_open = self.auto_opened.insert(config.id);
-                        source.children(session.catalog.databases.iter().map(|db| {
+                        source.children(session.catalog().databases.iter().map(|db| {
                             let item = database_item(config, db);
                             if db.is_current && auto_open {
                                 expanded.insert(format!("source:{}", config.id).into());
@@ -215,7 +222,21 @@ impl Explorer {
 
         self.meta = Rc::new(meta);
         self.items = items.clone();
-        self.tree.update(cx, |tree, cx| tree.set_items(items, cx));
+        // `set_items` clears the selection, and the console runs against the
+        // selected source, so carry it over: the same row if it still exists,
+        // else its data source.
+        self.tree.update(cx, |tree, cx| {
+            let selected = tree.selected_item().map(|item| item.id.clone());
+            tree.set_items(items, cx);
+            let Some(selected) = selected else { return };
+            let source = connection_of(&selected).map(|id| format!("source:{id}"));
+            for id in [Some(selected.to_string()), source].into_iter().flatten() {
+                tree.set_selected_item(Some(&TreeItem::new(id, "")), cx);
+                if tree.selected_index().is_some() {
+                    break;
+                }
+            }
+        });
         cx.notify();
     }
 
@@ -274,10 +295,7 @@ impl Explorer {
     }
 
     fn refresh(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
-        self.data_sources.update(cx, |ds, cx| {
-            ds.disconnect(id, cx);
-            ds.connect(id, HostKeyPolicy::KnownOnly, cx);
-        });
+        self.data_sources.update(cx, |ds, cx| ds.refresh(id, cx));
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -312,7 +330,7 @@ impl Explorer {
                 button(
                     "ex-refresh",
                     Icon::new(IconName::RefreshCw),
-                    "Reconnect and refresh",
+                    "Refresh (reconnects if needed)",
                 )
                 .band_disabled(selected.is_none())
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -520,11 +538,8 @@ impl Render for Explorer {
                                         .when_some(source_meta.map(|m| m.status), |el, status| {
                                             match status {
                                                 SourceStatus::Idle => el,
-                                                SourceStatus::Connecting => el.child(
-                                                    div()
-                                                        .text_xs()
-                                                        .text_color(muted)
-                                                        .child("connecting…"),
+                                                SourceStatus::Pending(text) => el.child(
+                                                    div().text_xs().text_color(muted).child(text),
                                                 ),
                                                 SourceStatus::Connected(version) => el
                                                     .child(

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter};
+use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use savoia_core::{AppError, AppResult, ConnectionConfig, ConnectionId, Secrets};
 use savoia_store::{ConnectionStore, KeychainSecrets, MemorySecrets, SecretStore};
 use savoia_tunnel::HostKeyPolicy;
@@ -18,6 +18,27 @@ pub enum SourceState {
     Connecting,
     Connected(Arc<Session>),
     Failed(String),
+}
+
+/// A catalog refresh in progress on a connected source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefreshState {
+    /// A query holds the session's gate; the refresh runs once it ends.
+    Waiting,
+    Loading,
+}
+
+/// Dropping it abandons the refresh, including its wait for the gate.
+struct Refresh {
+    state: RefreshState,
+    io: tokio::task::AbortHandle,
+    _task: Task<()>,
+}
+
+impl Drop for Refresh {
+    fn drop(&mut self) {
+        self.io.abort();
+    }
 }
 
 pub enum DataSourcesEvent {
@@ -42,6 +63,7 @@ pub struct DataSources {
     session_secrets: Arc<MemorySecrets>,
     connections: Vec<ConnectionConfig>,
     states: HashMap<ConnectionId, SourceState>,
+    refreshes: HashMap<ConnectionId, Refresh>,
     /// Shown in the explorer when local storage can't be opened.
     pub storage_error: Option<String>,
 }
@@ -73,6 +95,7 @@ impl DataSources {
             session_secrets: Arc::default(),
             connections: Vec::new(),
             states: HashMap::new(),
+            refreshes: HashMap::new(),
             storage_error,
         };
         this.reload();
@@ -97,6 +120,10 @@ impl DataSources {
 
     pub fn state(&self, id: ConnectionId) -> &SourceState {
         self.states.get(&id).unwrap_or(&SourceState::Disconnected)
+    }
+
+    pub fn refresh_state(&self, id: ConnectionId) -> Option<RefreshState> {
+        self.refreshes.get(&id).map(|r| r.state)
     }
 
     /// Loads the secrets for `id` off the UI thread: this session's first,
@@ -158,6 +185,7 @@ impl DataSources {
     /// Replaces the state of `id`, releasing any old session on the I/O
     /// runtime (pools and SSH handles may need it while shutting down).
     fn set_state(&mut self, id: ConnectionId, state: SourceState) {
+        self.refreshes.remove(&id);
         if let Some(SourceState::Connected(session)) = self.states.insert(id, state) {
             drop(runtime::spawn(async move { drop(session) }));
         }
@@ -229,6 +257,53 @@ impl DataSources {
             }
         };
         self.set_state(id, state);
+        cx.emit(DataSourcesEvent::Changed);
+    }
+
+    /// Reloads the catalog of a connected source on its own connection,
+    /// after any running query (see
+    /// `docs/adr/202610091309-serialize-all-work-on-one-connection-per-session.md`).
+    /// Reconnects if the reload fails or the source isn't connected.
+    pub fn refresh(&mut self, id: ConnectionId, cx: &mut Context<Self>) {
+        let SourceState::Connected(session) = self.state(id) else {
+            self.connect(id, HostKeyPolicy::KnownOnly, cx);
+            return;
+        };
+        if self.refreshes.contains_key(&id) {
+            return;
+        }
+        let state = if session.is_busy() {
+            RefreshState::Waiting
+        } else {
+            RefreshState::Loading
+        };
+        let session = session.clone();
+        let io = runtime::spawn(async move { session.reload_catalog().await });
+        let abort = io.abort_handle();
+        let task = cx.spawn(async move |this, cx| {
+            let result = session::join(io).await;
+            this.update(cx, |this, cx| this.finish_refresh(id, result, cx))
+                .ok();
+        });
+        self.refreshes.insert(
+            id,
+            Refresh {
+                state,
+                io: abort,
+                _task: task,
+            },
+        );
+        cx.emit(DataSourcesEvent::Changed);
+    }
+
+    fn finish_refresh(&mut self, id: ConnectionId, result: AppResult<()>, cx: &mut Context<Self>) {
+        // Abandoned (disconnected or reconnected) while it ran.
+        if self.refreshes.remove(&id).is_none() {
+            return;
+        }
+        if result.is_err() {
+            self.connect(id, HostKeyPolicy::KnownOnly, cx);
+        }
         cx.emit(DataSourcesEvent::Changed);
     }
 

@@ -5,7 +5,7 @@
 //! server waits, so a huge result never piles up in memory.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use gpui_kit::component::table::{Column, TableDelegate, TableState};
 use gpui_kit::component::{ActiveTheme as _, h_flex};
@@ -18,24 +18,57 @@ const LOAD_AHEAD: usize = 2 * PAGE_ROWS;
 
 /// How many rows the reader may load before it waits for the grid to ask
 /// for more. Shared between the grid (UI) and the console's reader task.
+///
+/// A paused result also holds up the statements after it, so the user can
+/// load all of it or skip the rest (read off and discard it).
 pub struct Pacer {
     wanted: AtomicUsize,
+    skip: AtomicBool,
     more: Notify,
+}
+
+/// What the reader does with the page it holds.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Next {
+    Load,
+    Skip,
 }
 
 impl Pacer {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             wanted: AtomicUsize::new(LOAD_AHEAD),
+            skip: AtomicBool::new(false),
             more: Notify::new(),
         })
     }
 
-    /// Waits until the grid wants more than `loaded` rows.
-    pub async fn room_for(&self, loaded: usize) {
-        while loaded >= self.wanted.load(Ordering::Acquire) {
+    /// Waits until the grid wants more than `loaded` rows, or until the user
+    /// skips the rest.
+    pub async fn room_for(&self, loaded: usize) -> Next {
+        loop {
+            if self.skip.load(Ordering::Acquire) {
+                return Next::Skip;
+            }
+            if loaded < self.wanted.load(Ordering::Acquire) {
+                return Next::Load;
+            }
             self.more.notified().await;
         }
+    }
+
+    /// Whether the reader stops at `loaded` rows.
+    fn is_full(&self, loaded: usize) -> bool {
+        !self.skip.load(Ordering::Acquire) && loaded >= self.wanted.load(Ordering::Acquire)
+    }
+
+    pub fn load_all(&self) {
+        self.want(usize::MAX);
+    }
+
+    pub fn skip_rest(&self) {
+        self.skip.store(true, Ordering::Release);
+        self.more.notify_one();
     }
 
     fn want(&self, rows: usize) {
@@ -86,6 +119,19 @@ impl ResultSet {
 
     pub fn len(&self) -> usize {
         self.rows.len()
+    }
+
+    /// The pacer of a still-streaming result.
+    pub fn pacer(&self) -> Option<&Arc<Pacer>> {
+        self.pacer.as_ref()
+    }
+
+    /// Streaming has stopped at the rows the grid asked for. (It may also
+    /// have reached the end; the reader only learns that from the next event.)
+    pub fn is_paused(&self) -> bool {
+        self.pacer
+            .as_ref()
+            .is_some_and(|p| p.is_full(self.rows.len()))
     }
 
     /// Whether a statement has produced a result set (beyond the row-number column).
@@ -180,7 +226,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
-    use super::{LOAD_AHEAD, Pacer};
+    use super::{LOAD_AHEAD, Next, Pacer};
 
     #[tokio::test]
     async fn reader_waits_until_the_grid_wants_more() {
@@ -191,9 +237,25 @@ mod tests {
 
         // Asked for before the reader waits: the permit isn't lost.
         pacer.want(LOAD_AHEAD + 1);
-        tokio::time::timeout(Duration::from_millis(20), pacer.room_for(LOAD_AHEAD))
-            .await
-            .expect("room after want");
+        let next = tokio::time::timeout(Duration::from_millis(20), pacer.room_for(LOAD_AHEAD));
+        assert_eq!(next.await.expect("room after want"), Next::Load);
+    }
+
+    #[tokio::test]
+    async fn skipping_releases_a_paused_reader() {
+        let pacer = Pacer::new();
+        assert!(pacer.is_full(LOAD_AHEAD));
+        pacer.skip_rest();
+        assert!(!pacer.is_full(LOAD_AHEAD));
+        assert_eq!(pacer.room_for(LOAD_AHEAD).await, Next::Skip);
+        assert_eq!(pacer.room_for(0).await, Next::Skip);
+    }
+
+    #[test]
+    fn load_all_never_pauses() {
+        let pacer = Pacer::new();
+        pacer.load_all();
+        assert!(!pacer.is_full(usize::MAX - 1));
     }
 
     #[test]

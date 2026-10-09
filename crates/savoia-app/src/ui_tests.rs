@@ -12,8 +12,9 @@ use savoia_store::{ConnectionStore, MemorySecrets};
 
 use crate::connection_form::ConnectionForm;
 use crate::console::QueryConsole;
-use crate::data_sources::{DataSources, SourceState};
+use crate::data_sources::{DataSources, RefreshState, SourceState};
 use crate::explorer::Explorer;
+use crate::session::Session;
 
 fn mount(
     cx: &mut TestAppContext,
@@ -129,18 +130,21 @@ async fn save_connect_and_list(cx: &mut TestAppContext, url: &str) -> Vec<String
 }
 
 /// Connects to `url` and opens a console on it, with the source selected.
-fn console_on(cx: &mut TestAppContext, url: &str) -> (Entity<QueryConsole>, AnyWindowHandle) {
+fn console_on(
+    cx: &mut TestAppContext,
+    url: &str,
+) -> (Entity<DataSources>, Entity<QueryConsole>, AnyWindowHandle) {
     let (ds, explorer) = save_and_connect(cx, url);
     explorer.update(cx, |e, cx| e.select_first_source(cx));
     cx.update(crate::console::init);
     let (window, console) = cx
         .update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| QueryConsole::new(ds, explorer, window, cx))
+                cx.new(|cx| QueryConsole::new(ds.clone(), explorer, window, cx))
             })
         })
         .expect("window");
-    (console, window)
+    (ds, console, window)
 }
 
 /// Types `sql` into the console and clicks Run.
@@ -185,7 +189,7 @@ fn output(cx: &mut TestAppContext, console: &Entity<QueryConsole>) -> Vec<String
 }
 
 fn runs_a_script_and_reports_each_statement(url: &str, cx: &mut TestAppContext) {
-    let (console, window) = console_on(cx, url);
+    let (_, console, window) = console_on(cx, url);
     run(
         cx,
         window,
@@ -225,6 +229,75 @@ async fn mysql_console_runs_a_script(cx: &mut TestAppContext) {
     runs_a_script_and_reports_each_statement(&url, cx);
 }
 
+/// A result that ends exactly where the grid stops asking still finishes:
+/// the reader only waits when another page actually arrives.
+#[gpui_kit::test]
+async fn postgres_console_finishes_a_result_that_fills_the_grid(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    run(
+        cx,
+        window,
+        &console,
+        "SELECT g FROM generate_series(1, 1000) g",
+    );
+    idle(cx, &console);
+    assert_eq!(grid(cx, &console).0, 1000);
+}
+
+fn paused(cx: &mut TestAppContext, console: &Entity<QueryConsole>) -> bool {
+    console.read_with(cx, |c, cx| c.results().read(cx).delegate().is_paused())
+}
+
+/// Skip rest discards the paused result's remaining rows so the script goes on.
+#[gpui_kit::test]
+async fn postgres_console_skips_the_rest_of_a_paused_result(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    run(
+        cx,
+        window,
+        &console,
+        "SELECT g FROM generate_series(1, 100000) g; SELECT 'after' AS a",
+    );
+    wait_until(cx, "the pause", |cx| paused(cx, &console));
+    click(cx, window, "skip-rest");
+    idle(cx, &console);
+
+    assert_eq!(grid(cx, &console).1[1], "after");
+    let lines = output(cx, &console);
+    assert!(
+        lines[0].starts_with("1,000 rows (99,000 rows skipped) · "),
+        "{lines:?}"
+    );
+    assert!(lines[1].starts_with("1 row · "), "{lines:?}");
+}
+
+/// Load all streams the rest of a paused result into the grid.
+#[gpui_kit::test]
+async fn mysql_console_loads_all_of_a_paused_result(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_MYSQL_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    run(
+        cx,
+        window,
+        &console,
+        // Recursion stops at depth 1,000 by default; cross join to get more rows.
+        "WITH RECURSIVE k (n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM k WHERE n < 999) \
+         SELECT a.n * 1000 + b.n AS n FROM k a CROSS JOIN k b LIMIT 20000",
+    );
+    wait_until(cx, "the pause", |cx| paused(cx, &console));
+    click(cx, window, "load-all");
+    idle(cx, &console);
+    assert_eq!(grid(cx, &console).0, 20000);
+}
+
 /// A big result loads only what the grid asked for; Cancel stops it and
 /// frees the connection for the next run.
 #[gpui_kit::test]
@@ -232,7 +305,7 @@ async fn postgres_console_pauses_big_results_and_cancels(cx: &mut TestAppContext
     let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
         return;
     };
-    let (console, window) = console_on(cx, &url);
+    let (_, console, window) = console_on(cx, &url);
     run(
         cx,
         window,
@@ -294,4 +367,49 @@ async fn mysql_save_and_connect_shows_groups_under_the_database(cx: &mut TestApp
         Some("tables"),
         "{labels:?}"
     );
+}
+
+fn session_of(cx: &mut TestAppContext, ds: &Entity<DataSources>) -> Option<Arc<Session>> {
+    ds.read_with(cx, |ds, _| match ds.state(ds.connections()[0].id) {
+        SourceState::Connected(session) => Some(session.clone()),
+        _ => None,
+    })
+}
+
+fn refresh_state(cx: &mut TestAppContext, ds: &Entity<DataSources>) -> Option<RefreshState> {
+    ds.read_with(cx, |ds, _| ds.refresh_state(ds.connections()[0].id))
+}
+
+/// Refresh waits for the running query and then reloads the catalog on the
+/// same connection; disconnecting abandons the wait.
+#[gpui_kit::test]
+async fn postgres_refresh_waits_for_the_running_query(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, console, window) = console_on(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    let before = session_of(cx, &ds).expect("connected");
+    let big = "SELECT g FROM generate_series(1, 100000) g";
+
+    run(cx, window, &console, big);
+    wait_until(cx, "the pause", |cx| paused(cx, &console));
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    std::thread::sleep(Duration::from_millis(300));
+    cx.run_until_parked();
+    assert_eq!(refresh_state(cx, &ds), Some(RefreshState::Waiting));
+
+    click(cx, window, "cancel");
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+    let after = session_of(cx, &ds).expect("still connected");
+    assert!(Arc::ptr_eq(&before, &after), "refresh reconnected");
+
+    run(cx, window, &console, big);
+    wait_until(cx, "the pause", |cx| paused(cx, &console));
+    ds.update(cx, |ds, cx| {
+        ds.refresh(id, cx);
+        ds.disconnect(id, cx);
+    });
+    assert_eq!(refresh_state(cx, &ds), None);
+    assert!(session_of(cx, &ds).is_none());
 }

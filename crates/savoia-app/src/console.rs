@@ -23,7 +23,7 @@ use savoia_core::{AppError, QueryEvent};
 
 use crate::data_sources::{DataSources, SourceState};
 use crate::explorer::Explorer;
-use crate::results::{Pacer, ResultSet};
+use crate::results::{Next, Pacer, ResultSet};
 use crate::session::{self, Session};
 use crate::theme::BandDisabled as _;
 use crate::{runtime, theme};
@@ -84,6 +84,8 @@ impl QueryConsole {
         let editor = cx.new(|cx| EditorState::new(window, cx).language("sql"));
         let results = cx.new(|cx| TableState::new(ResultSet::empty(), window, cx));
         cx.observe(&explorer, |_, _, cx| cx.notify()).detach();
+        // Scrolling asks for rows, which can end a pause.
+        cx.observe(&results, |_, _, cx| cx.notify()).detach();
         Self {
             data_sources,
             explorer,
@@ -175,6 +177,7 @@ impl QueryConsole {
             };
             // Rows of the current result set; `None` for statements without one.
             let mut loaded: Option<usize> = None;
+            let mut skipped = 0;
             let mut pacer: Option<Arc<Pacer>> = None;
             while let Some(event) = query.next().await {
                 let alive = match event {
@@ -182,17 +185,24 @@ impl QueryConsole {
                         let fresh = Pacer::new();
                         pacer = Some(fresh.clone());
                         loaded = Some(0);
+                        skipped = 0;
                         this.update(cx, |this, cx| this.start_result(meta, fresh, cx))
                     }
                     Ok(QueryEvent::Rows(rows)) => {
                         let total = loaded.get_or_insert(0);
+                        // Wait with this page in hand rather than after adding
+                        // it, so an end that follows the last page isn't held up.
+                        let next = match &pacer {
+                            Some(pacer) => pacer.room_for(*total).await,
+                            None => Next::Load,
+                        };
+                        if next == Next::Skip {
+                            skipped += rows.len();
+                            continue;
+                        }
                         *total += rows.len();
                         let total = *total;
-                        let alive = this.update(cx, |this, cx| this.add_rows(rows, total, cx));
-                        if let Some(pacer) = &pacer {
-                            pacer.room_for(total).await;
-                        }
-                        alive
+                        this.update(cx, |this, cx| this.add_rows(rows, total, cx))
                     }
                     Ok(QueryEvent::Done {
                         rows_affected,
@@ -201,7 +211,7 @@ impl QueryConsole {
                         let rows = loaded.take();
                         pacer = None;
                         this.update(cx, |this, cx| {
-                            this.statement_done(rows, rows_affected, elapsed, cx)
+                            this.statement_done(rows, skipped, rows_affected, elapsed, cx)
                         })
                     }
                     Err(err) => this.update_in(cx, |this, window, cx| this.fail(err, window, cx)),
@@ -258,11 +268,15 @@ impl QueryConsole {
     fn statement_done(
         &mut self,
         rows: Option<usize>,
+        skipped: usize,
         rows_affected: Option<u64>,
         elapsed: Duration,
         cx: &mut Context<Self>,
     ) {
         let what = match (rows, rows_affected) {
+            (Some(rows), _) if skipped > 0 => {
+                format!("{} ({} skipped)", count(rows, "row"), count(skipped, "row"))
+            }
             (Some(rows), _) => count(rows, "row"),
             (None, Some(affected)) => format!("{} affected", count(affected as usize, "row")),
             (None, None) => "OK".to_string(),
@@ -390,7 +404,9 @@ impl QueryConsole {
 
     fn render_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let has_result = self.results.read(cx).delegate().has_result();
+        let results = self.results.read(cx).delegate();
+        let (has_result, paused) = (results.has_result(), results.is_paused());
+        let pacer = results.pacer().cloned();
         let pane_tab = |id: &'static str, label: &'static str, pane: Pane| {
             let selected = self.pane == pane;
             div()
@@ -459,6 +475,36 @@ impl QueryConsole {
                         this.child(pane_tab("pane-result", "Result 1", Pane::Result))
                     })
                     .child(div().flex_1())
+                    .when_some(pacer.filter(|_| paused), |this, pacer| {
+                        let skip = pacer.clone();
+                        this.child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child("Paused · statements after this one wait"),
+                        )
+                        .child(
+                            Button::new("load-all")
+                                .ghost()
+                                .xsmall()
+                                .label("Load all")
+                                .tooltip("Load every remaining row of this result")
+                                .on_click(cx.listener(move |_, _, _, cx| {
+                                    pacer.load_all();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("skip-rest")
+                                .ghost()
+                                .xsmall()
+                                .label("Skip rest")
+                                .tooltip("Discard the remaining rows and continue")
+                                .on_click(cx.listener(move |_, _, _, cx| {
+                                    skip.skip_rest();
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .children(
                         self.summary
                             .clone()
