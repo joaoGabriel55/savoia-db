@@ -12,8 +12,74 @@ pub const BOX_PADDING: f32 = 6.;
 const GAP_X: f32 = 96.;
 const GAP_Y: f32 = 36.;
 
-pub fn box_height(table: &TableInfo) -> f32 {
-    HEADER_HEIGHT + table.columns.len().max(1) as f32 * ROW_HEIGHT + BOX_PADDING
+/// Smallest and largest zoom; 1.0 is 100%.
+pub const MIN_ZOOM: f32 = 0.1;
+pub const MAX_ZOOM: f32 = 2.5;
+
+/// A collapsed box shows only its header.
+pub fn box_height(table: &TableInfo, collapsed: bool) -> f32 {
+    if collapsed {
+        HEADER_HEIGHT
+    } else {
+        HEADER_HEIGHT + table.columns.len().max(1) as f32 * ROW_HEIGHT + BOX_PADDING
+    }
+}
+
+/// How the diagram maps to the view: `screen = offset + diagram * zoom`,
+/// with screen coordinates relative to the view's top-left corner.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Viewport {
+    pub zoom: f32,
+    pub offset: (f32, f32),
+}
+
+impl Viewport {
+    pub fn new(offset: (f32, f32)) -> Self {
+        Self { zoom: 1., offset }
+    }
+
+    pub fn to_screen(self, (x, y): (f32, f32)) -> (f32, f32) {
+        (self.offset.0 + x * self.zoom, self.offset.1 + y * self.zoom)
+    }
+
+    /// Multiplies the zoom by `factor` (within limits), keeping the diagram
+    /// point under `anchor` (a screen point) where it is.
+    pub fn zoom_at(&mut self, factor: f32, anchor: (f32, f32)) {
+        let zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        let ratio = zoom / self.zoom;
+        self.offset = (
+            anchor.0 - (anchor.0 - self.offset.0) * ratio,
+            anchor.1 - (anchor.1 - self.offset.1) * ratio,
+        );
+        self.zoom = zoom;
+    }
+
+    /// Shows all of `extent` (`min_x, min_y, max_x, max_y` in diagram units)
+    /// centered in a `view` of `(width, height)`, never above 100%.
+    pub fn fit(extent: (f32, f32, f32, f32), view: (f32, f32), margin: f32) -> Self {
+        let (w, h) = ((extent.2 - extent.0).max(1.), (extent.3 - extent.1).max(1.));
+        let room = (
+            (view.0 - 2. * margin).max(1.),
+            (view.1 - 2. * margin).max(1.),
+        );
+        let zoom = (room.0 / w).min(room.1 / h).clamp(MIN_ZOOM, 1.);
+        let offset = (
+            (view.0 - w * zoom) / 2. - extent.0 * zoom,
+            (view.1 - h * zoom) / 2. - extent.1 * zoom,
+        );
+        Self { zoom, offset }
+    }
+}
+
+/// The box enclosing every table, or `None` for no tables.
+pub fn extent(positions: &[(f32, f32)], heights: &[f32]) -> Option<(f32, f32, f32, f32)> {
+    positions
+        .iter()
+        .zip(heights)
+        .fold(None, |acc, (&(x, y), &h)| {
+            let (a, b, c, d) = acc.unwrap_or((x, y, x + BOX_WIDTH, y + h));
+            Some((a.min(x), b.min(y), c.max(x + BOX_WIDTH), d.max(y + h)))
+        })
 }
 
 /// A foreign key between two tables of the diagram, by table and column index.
@@ -60,8 +126,10 @@ pub fn edges(schema: &str, tables: &[TableInfo]) -> Vec<Edge> {
 /// every table it references. Within a column, tables are ordered by where
 /// their referenced tables are, to keep lines short. Tables without any
 /// relationship go in a grid below.
-pub fn layout(tables: &[TableInfo], edges: &[Edge]) -> Vec<(f32, f32)> {
-    let n = tables.len();
+///
+/// `heights` are the boxes' heights, in `tables` order.
+pub fn layout(heights: &[f32], edges: &[Edge]) -> Vec<(f32, f32)> {
+    let n = heights.len();
     let mut refs: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut related = vec![false; n];
     for e in edges {
@@ -133,7 +201,7 @@ pub fn layout(tables: &[TableInfo], edges: &[Edge]) -> Vec<(f32, f32)> {
         let mut y = 0f32;
         for &i in column {
             out[i] = (x, y);
-            y += box_height(&tables[i]) + GAP_Y;
+            y += heights[i] + GAP_Y;
         }
         bottom = bottom.max(y);
     }
@@ -149,7 +217,7 @@ pub fn layout(tables: &[TableInfo], edges: &[Edge]) -> Vec<(f32, f32)> {
         let mut tallest = 0f32;
         for (k, &i) in row.iter().enumerate() {
             out[i] = (k as f32 * (BOX_WIDTH + GAP_X), y);
-            tallest = tallest.max(box_height(&tables[i]));
+            tallest = tallest.max(heights[i]);
         }
         y += tallest + GAP_Y;
     }
@@ -160,7 +228,11 @@ pub fn layout(tables: &[TableInfo], edges: &[Edge]) -> Vec<(f32, f32)> {
 mod tests {
     use savoia_core::{ColumnInfo, ForeignKey, TableInfo, TableKind};
 
-    use super::{BOX_WIDTH, Edge, edges, layout};
+    use super::{BOX_WIDTH, Edge, MAX_ZOOM, Viewport, box_height, edges, extent, layout};
+
+    fn heights(tables: &[TableInfo]) -> Vec<f32> {
+        tables.iter().map(|t| box_height(t, false)).collect()
+    }
 
     fn table(name: &str, columns: &[&str], fks: &[(&str, &str, &str)]) -> TableInfo {
         let mut t = TableInfo::new(name, TableKind::Table);
@@ -246,7 +318,7 @@ mod tests {
     fn referenced_tables_sit_left_of_their_referrers() {
         let tables = shop();
         let edges = edges("public", &tables);
-        let at = layout(&tables, &edges);
+        let at = layout(&heights(&tables), &edges);
         for e in &edges {
             assert!(at[e.to].0 + BOX_WIDTH < at[e.from].0, "{e:?} {at:?}");
         }
@@ -258,13 +330,13 @@ mod tests {
     #[test]
     fn boxes_never_overlap() {
         let tables = shop();
-        let at = layout(&tables, &edges("public", &tables));
+        let at = layout(&heights(&tables), &edges("public", &tables));
         for i in 0..tables.len() {
             for j in i + 1..tables.len() {
                 let (a, b) = (at[i], at[j]);
                 let apart_x = a.0 + BOX_WIDTH <= b.0 || b.0 + BOX_WIDTH <= a.0;
-                let apart_y = a.1 + super::box_height(&tables[i]) <= b.1
-                    || b.1 + super::box_height(&tables[j]) <= a.1;
+                let apart_y = a.1 + box_height(&tables[i], false) <= b.1
+                    || b.1 + box_height(&tables[j], false) <= a.1;
                 assert!(apart_x || apart_y, "{i} and {j} overlap: {at:?}");
             }
         }
@@ -276,7 +348,55 @@ mod tests {
             table("a", &["id", "b_id"], &[("b_id", "b", "id")]),
             table("b", &["id", "a_id"], &[("a_id", "a", "id")]),
         ];
-        let at = layout(&tables, &edges("public", &tables));
+        let at = layout(&heights(&tables), &edges("public", &tables));
         assert_ne!(at[0], at[1]);
+    }
+
+    #[test]
+    fn collapsed_boxes_pack_tighter() {
+        let tables = shop();
+        let edges = edges("public", &tables);
+        let open = layout(&heights(&tables), &edges);
+        let shut: Vec<f32> = tables.iter().map(|t| box_height(t, true)).collect();
+        let packed = layout(&shut, &edges);
+        let bottom = |at: &[(f32, f32)], h: &[f32]| extent(at, h).unwrap().3;
+        assert!(bottom(&packed, &shut) < bottom(&open, &heights(&tables)));
+    }
+
+    #[test]
+    fn zooming_keeps_the_point_under_the_cursor() {
+        let mut v = Viewport::new((40., 10.));
+        let cursor = (300., 200.);
+        let under = (
+            (cursor.0 - v.offset.0) / v.zoom,
+            (cursor.1 - v.offset.1) / v.zoom,
+        );
+        v.zoom_at(1.5, cursor);
+        let (x, y) = v.to_screen(under);
+        assert!(
+            (x - cursor.0).abs() < 1e-3 && (y - cursor.1).abs() < 1e-3,
+            "{v:?}"
+        );
+        v.zoom_at(100., cursor);
+        assert_eq!(v.zoom, MAX_ZOOM);
+    }
+
+    #[test]
+    fn fit_shows_everything_centered_and_never_magnifies() {
+        let extent = (100., 50., 2100., 1050.); // 2000 x 1000
+        let v = Viewport::fit(extent, (1040., 640.), 20.);
+        assert!((v.zoom - 0.5).abs() < 1e-6, "{v:?}");
+        let (left, top) = v.to_screen((extent.0, extent.1));
+        let (right, bottom) = v.to_screen((extent.2, extent.3));
+        assert!(
+            (left - (1040. - right)).abs() < 1e-3,
+            "centered across: {left} {right}"
+        );
+        assert!(
+            (top - (640. - bottom)).abs() < 1e-3,
+            "centered down: {top} {bottom}"
+        );
+        let small = Viewport::fit((0., 0., 100., 100.), (1000., 1000.), 20.);
+        assert_eq!(small.zoom, 1.);
     }
 }

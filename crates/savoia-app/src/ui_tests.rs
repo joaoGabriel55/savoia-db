@@ -551,6 +551,32 @@ async fn postgres_explorer_loads_on_expand_and_draws_the_diagram(cx: &mut TestAp
     );
     // Paints boxes and lines without panicking, and survives a reset.
     click(cx, window, "erd-reset");
+    let zoom = |cx: &mut TestAppContext| diagram.read_with(cx, |d, _| d.zoom());
+    let fitted = zoom(cx);
+    assert!(fitted <= 1., "fit never magnifies: {fitted}");
+
+    click(cx, window, "erd-zoom-reset");
+    assert!((zoom(cx) - 1.).abs() < 1e-4);
+    click(cx, window, "erd-zoom-in");
+    assert!((zoom(cx) - 1.25).abs() < 1e-4, "{}", zoom(cx));
+    click(cx, window, "erd-zoom-out");
+    click(cx, window, "erd-zoom-out");
+    assert!((zoom(cx) - 0.8).abs() < 1e-4, "{}", zoom(cx));
+    click(cx, window, "erd-fit");
+    assert!((zoom(cx) - fitted).abs() < 1e-4);
+
+    click(cx, window, "erd-collapse-all");
+    assert_eq!(diagram.read_with(cx, |d, _| d.collapsed_count()), 3);
+    click(cx, window, "erd-collapse-all");
+    assert_eq!(diagram.read_with(cx, |d, _| d.collapsed_count()), 0);
+
+    // Right after a frame, a burst of moves waits for the next 60 fps slot
+    // instead of redrawing at once.
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    assert!(diagram.update(cx, |d, cx| d.drag_moves(50, cx)));
+    std::thread::sleep(Duration::from_millis(30));
+    cx.run_until_parked();
     cx.update_window(window, |_, window, cx| window.render_frame(cx))
         .unwrap();
 }

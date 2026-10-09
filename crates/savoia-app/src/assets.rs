@@ -11,6 +11,8 @@ icon_assets!(
     [
         ArrowUpDown,
         Braces,
+        ChevronsDownUp,
+        ChevronsUpDown,
         CircleStop,
         Columns3,
         Database,
@@ -24,12 +26,15 @@ icon_assets!(
         ListOrdered,
         Plug,
         RotateCcw,
+        Scan,
         Server,
         Table,
         Timer,
         Unplug,
         Upload,
         Workflow,
+        ZoomIn,
+        ZoomOut,
     ]
 );
 
