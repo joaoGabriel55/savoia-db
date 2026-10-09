@@ -1,6 +1,6 @@
 [package]
 name = "savoia-tunnel"
-description = "SSH local port forwarding for Savoia DB connections (russh)."
+description = "SSH local port forwarding for Savoia Studio connections (russh)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

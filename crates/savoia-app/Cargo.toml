@@ -1,12 +1,12 @@
 [package]
 name = "savoia-app"
-description = "Savoia DB native desktop app (GPUI)."
+description = "Savoia Studio native desktop app (GPUI)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "savoia-db"
+name = "savoia-studio"
 path = "src/main.rs"
 
 [dependencies]

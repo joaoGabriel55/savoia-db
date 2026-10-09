@@ -1,5 +1,5 @@
 ---
-name: Savoia DB
+name: Savoia Studio
 description: A graphite IDE named by flat Ivrea-green zone bands, with one Savoy-blue Run.
 colors:
   ivrea-green: "#1F5A43"
@@ -128,7 +128,7 @@ components:
     size: "6px"
 ---
 
-# Design System: Savoia DB
+# Design System: Savoia Studio
 
 ## Overview
 

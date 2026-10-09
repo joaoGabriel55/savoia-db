@@ -71,7 +71,7 @@ fn pg_config(endpoint: &Endpoint, secrets: &Secrets) -> AppResult<Config> {
         .port(endpoint.port)
         .user(&endpoint.user)
         .dbname(endpoint.database.as_deref().unwrap_or(DEFAULT_DATABASE))
-        .application_name("Savoia DB")
+        .application_name("Savoia Studio")
         .connect_timeout(CONNECT_TIMEOUT)
         .ssl_mode(match endpoint.ssl {
             SslMode::Disable => PgSslMode::Disable,

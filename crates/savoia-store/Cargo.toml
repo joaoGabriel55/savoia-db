@@ -1,6 +1,6 @@
 [package]
 name = "savoia-store"
-description = "Local persistence for Savoia DB: saved connections (SQLite) and secrets (a user-only file)."
+description = "Local persistence for Savoia Studio: saved connections (SQLite) and secrets (a user-only file)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

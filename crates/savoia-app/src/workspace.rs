@@ -208,7 +208,7 @@ impl Render for Workspace {
                                 .text_color(theme::c(theme::BAND_INK)),
                         ),
                 )
-                .child(div().font_semibold().child("Savoia DB"))
+                .child(div().font_semibold().child("Savoia Studio"))
                 .children(
                     source_name
                         .clone()

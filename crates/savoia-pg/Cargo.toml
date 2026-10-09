@@ -1,6 +1,6 @@
 [package]
 name = "savoia-pg"
-description = "PostgreSQL driver for Savoia DB (tokio-postgres)."
+description = "PostgreSQL driver for Savoia Studio (tokio-postgres)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

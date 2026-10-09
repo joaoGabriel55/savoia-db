@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// A database engine Savoia DB can connect to.
+/// A database engine Savoia Studio can connect to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Engine {
