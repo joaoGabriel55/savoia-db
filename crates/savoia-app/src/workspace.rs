@@ -24,6 +24,7 @@ use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
 use crate::memory::MemoryMeter;
 use crate::structure::StructureView;
 use crate::theme;
+use savoia_core::data_query::Filter;
 
 actions!(workspace, [NewConsole]);
 
@@ -209,32 +210,49 @@ impl Workspace {
     }
 
     /// Opens the data view of `node`'s table, or brings its tab forward.
-    pub fn open_data(&mut self, node: NodeRef, window: &mut Window, cx: &mut Context<Self>) {
+    /// With filters (related rows of another view) it always opens anew.
+    pub fn open_data(
+        &mut self,
+        node: NodeRef,
+        filters: Vec<Filter>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let open = self.pages.iter().position(|page| match page {
-            Page::Data(view) => view.read(cx).shows(&node),
+            Page::Data(view) => filters.is_empty() && view.read(cx).shows(&node),
             _ => false,
         });
         self.active = match open {
             Some(i) => i,
             None => {
                 let data_sources = self.data_sources.clone();
-                let view = cx.new(|cx| DataView::new(data_sources, node, window, cx));
-                cx.subscribe_in(
-                    &view,
-                    window,
-                    |this, _, event: &DataViewEvent, window, cx| {
-                        let DataViewEvent::Sql { connection, sql } = event;
-                        let console = this.console_for(*connection, window, cx);
-                        console.update(cx, |c, cx| c.insert_sql(sql, false, window, cx));
-                        cx.notify();
-                    },
-                )
-                .detach();
+                let view = cx.new(|cx| DataView::new(data_sources, node, filters, window, cx));
+                cx.subscribe_in(&view, window, Self::on_data_view_event)
+                    .detach();
                 cx.observe(&view, |_, _, cx| cx.notify()).detach();
                 self.pages.push(Page::Data(view));
                 self.pages.len() - 1
             }
         };
+        cx.notify();
+    }
+
+    fn on_data_view_event(
+        &mut self,
+        _: &Entity<DataView>,
+        event: &DataViewEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            DataViewEvent::Sql { connection, sql } => {
+                let console = self.console_for(*connection, window, cx);
+                console.update(cx, |c, cx| c.insert_sql(sql, false, window, cx));
+            }
+            DataViewEvent::Open { node, filters } => {
+                self.open_data(node.clone(), filters.clone(), window, cx)
+            }
+        }
         cx.notify();
     }
 
@@ -248,7 +266,7 @@ impl Workspace {
         match event {
             ExplorerEvent::ShowDiagram(node) => self.show_diagram(node.clone(), cx),
             ExplorerEvent::ShowStructure(node) => self.show_structure(node.clone(), cx),
-            ExplorerEvent::OpenData(node) => self.open_data(node.clone(), window, cx),
+            ExplorerEvent::OpenData(node) => self.open_data(node.clone(), Vec::new(), window, cx),
             ExplorerEvent::Sql {
                 connection,
                 sql,

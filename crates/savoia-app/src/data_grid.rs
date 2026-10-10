@@ -1,6 +1,9 @@
 //! The data view's grid: rows loaded from the server plus the pending
 //! changes on them. New rows show first, then loaded rows; edited cells,
 //! new rows and rows marked for deletion are tinted until committed.
+//!
+//! Only base-table columns edit. Columns from related tables (lookups and
+//! summaries) are read-only; the row menu opens the related rows instead.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,8 +13,8 @@ use gpui_kit::component::table::{Column, ColumnSort, TableDelegate, TableState};
 use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use savoia_core::Row;
 use savoia_core::edit::{Change, Value};
-use savoia_core::{Row, TableInfo};
 
 /// What the grid asks of the view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +22,16 @@ pub enum Request {
     /// Sort by a data column (0-based), descending or not; `None` resets.
     Sort(Option<(usize, bool)>),
     More,
+    /// Open the rows related to a grid row: `relations[ix]`.
+    Open {
+        row: usize,
+        relation: usize,
+    },
+    /// Choose a value for a foreign-key cell from the referenced table.
+    Pick {
+        row: usize,
+        col: usize,
+    },
 }
 
 /// A grid row: a new one (index into `inserted`) or a loaded one.
@@ -28,18 +41,38 @@ pub enum Source {
     Loaded(usize),
 }
 
+/// One data column of the grid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridColumn {
+    pub label: String,
+    /// The base-table column it shows, if it is one: only those edit.
+    pub base: Option<String>,
+    pub numeric: bool,
+    /// The referenced table's name, when the column is a single-column
+    /// foreign key whose value can be picked from it.
+    pub picks_from: Option<String>,
+}
+
+/// Rows related to a grid row, offered in its menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relation {
+    pub label: String,
+    /// Grid columns (0-based) whose values select the related rows.
+    pub columns: Vec<usize>,
+}
+
 pub struct DataRows {
     columns: Vec<Column>,
-    names: Vec<String>,
-    numeric: Vec<bool>,
+    data: Vec<GridColumn>,
     pub(crate) rows: Vec<Row>,
     /// Another page exists on the server.
     pub(crate) more: bool,
     pub(crate) loading: bool,
     pub(crate) request: Option<Request>,
-    /// Data columns (0-based) of the row's key; empty when not editable.
+    /// Data columns (0-based) of the row's key.
     key: Vec<usize>,
     pub(crate) editable: bool,
+    pub(crate) relations: Vec<Relation>,
     pub(crate) inserted: Vec<Vec<Value>>,
     /// New values by (loaded row, data column).
     pub(crate) edits: BTreeMap<(usize, usize), Value>,
@@ -52,12 +85,7 @@ pub struct DataRows {
 }
 
 impl DataRows {
-    pub fn new(info: &TableInfo, key: &[String], editable: bool) -> Self {
-        let numeric: Vec<bool> = info
-            .columns
-            .iter()
-            .map(|c| is_numeric_type(&c.data_type))
-            .collect();
+    pub fn new(data: Vec<GridColumn>, key: &[String], editable: bool) -> Self {
         let columns = std::iter::once(
             Column::new("#", "")
                 .width(px(52.))
@@ -66,30 +94,30 @@ impl DataRows {
                 .resizable(false)
                 .selectable(false),
         )
-        .chain(info.columns.iter().zip(&numeric).map(|(c, numeric)| {
-            let column = Column::new(SharedString::from(c.name.clone()), c.name.clone()).sortable();
-            if *numeric {
+        .chain(data.iter().map(|c| {
+            let column =
+                Column::new(SharedString::from(c.label.clone()), c.label.clone()).sortable();
+            if c.numeric {
                 column.text_right()
             } else {
                 column
             }
         }))
         .collect();
-        let names: Vec<String> = info.columns.iter().map(|c| c.name.clone()).collect();
         let key = key
             .iter()
-            .filter_map(|k| names.iter().position(|n| n == k))
+            .filter_map(|k| data.iter().position(|c| c.base.as_ref() == Some(k)))
             .collect();
         Self {
             columns,
-            names,
-            numeric,
+            data,
             rows: Vec::new(),
             more: false,
             loading: true,
             request: None,
             key,
             editable,
+            relations: Vec::new(),
             inserted: Vec::new(),
             edits: BTreeMap::new(),
             deleted: BTreeSet::new(),
@@ -115,6 +143,13 @@ impl DataRows {
         }
     }
 
+    /// Whether a cell can take an edit.
+    pub fn can_edit(&self, grid_row: usize, col: usize) -> bool {
+        let deleted =
+            matches!(self.source(grid_row), Source::Loaded(i) if self.deleted.contains(&i));
+        self.editable && !deleted && self.data.get(col).is_some_and(|c| c.base.is_some())
+    }
+
     /// The value shown in a cell, pending edits included.
     pub fn value(&self, grid_row: usize, col: usize) -> Option<&str> {
         match self.source(grid_row) {
@@ -127,8 +162,11 @@ impl DataRows {
     }
 
     /// Sets a cell's pending value. Setting a loaded cell back to what the
-    /// server has drops the edit.
+    /// server has drops the edit. Read-only columns ignore it.
     pub fn set(&mut self, grid_row: usize, col: usize, value: Value) {
+        if self.data.get(col).is_none_or(|c| c.base.is_none()) {
+            return;
+        }
         match self.source(grid_row) {
             Source::New(i) => self.inserted[i][col] = value,
             Source::Loaded(i) => {
@@ -142,7 +180,7 @@ impl DataRows {
     }
 
     pub fn add_row(&mut self) {
-        self.inserted.insert(0, vec![None; self.names.len()]);
+        self.inserted.insert(0, vec![None; self.data.len()]);
         self.editing = None;
     }
 
@@ -172,14 +210,34 @@ impl DataRows {
         self.editing = None;
     }
 
+    fn base(&self, col: usize) -> String {
+        self.data[col].base.clone().unwrap_or_default()
+    }
+
     fn key_of(&self, loaded: usize) -> Vec<(String, Value)> {
         self.key
             .iter()
             .map(|&col| {
-                let value = self.rows[loaded][col].as_deref().map(str::to_owned);
-                (self.names[col].clone(), value)
+                (
+                    self.base(col),
+                    self.rows[loaded][col].as_deref().map(str::to_owned),
+                )
             })
             .collect()
+    }
+
+    /// The loaded values of `columns` in a grid row, for opening related
+    /// rows; `None` for a new row.
+    pub fn values(&self, grid_row: usize, columns: &[usize]) -> Option<Vec<Value>> {
+        let Source::Loaded(i) = self.source(grid_row) else {
+            return None;
+        };
+        Some(
+            columns
+                .iter()
+                .map(|&c| self.rows[i][c].as_deref().map(str::to_owned))
+                .collect(),
+        )
     }
 
     /// The pending changes: deletes, then updates, then inserts. Inserts
@@ -198,7 +256,7 @@ impl DataRows {
                 updates
                     .entry(*row)
                     .or_default()
-                    .push((self.names[*col].clone(), value.clone()));
+                    .push((self.base(*col), value.clone()));
             }
         }
         changes.extend(updates.into_iter().map(|(row, values)| Change::Update {
@@ -211,7 +269,7 @@ impl DataRows {
                     .iter()
                     .enumerate()
                     .filter(|(_, v)| v.is_some())
-                    .map(|(col, v)| (self.names[col].clone(), v.clone()))
+                    .map(|(col, v)| (self.base(col), v.clone()))
                     .collect(),
             }
         }));
@@ -255,12 +313,14 @@ impl TableDelegate for DataRows {
         let muted = theme.muted_foreground;
         let source = self.source(row_ix);
         let deleted = matches!(source, Source::Loaded(i) if self.deleted.contains(&i));
+        let related = col_ix > 0 && self.data[col_ix - 1].base.is_none();
         let tint = match source {
             Source::New(_) => Some(theme.success.opacity(0.14)),
             _ if deleted => Some(theme.danger.opacity(0.14)),
             Source::Loaded(i) if col_ix > 0 && self.edits.contains_key(&(i, col_ix - 1)) => {
                 Some(theme.warning.opacity(0.2))
             }
+            _ if related => Some(theme.muted.opacity(0.5)),
             _ => None,
         };
         let cell = h_flex()
@@ -288,7 +348,7 @@ impl TableDelegate for DataRows {
         {
             return Input::new(input).xsmall().into_any_element();
         }
-        let cell = cell.when(self.numeric[col], |c| c.justify_end());
+        let cell = cell.when(self.data[col].numeric, |c| c.justify_end());
         match self.value(row_ix, col) {
             Some(text) => cell
                 .child(SharedString::from(text.to_owned()))
@@ -296,8 +356,8 @@ impl TableDelegate for DataRows {
             None => cell
                 .text_color(muted)
                 .child(match source {
-                    Source::New(_) => "default",
-                    Source::Loaded(_) => "NULL",
+                    Source::New(_) if !related => "default",
+                    _ => "NULL",
                 })
                 .into_any_element(),
         }
@@ -326,16 +386,13 @@ impl TableDelegate for DataRows {
         _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> PopupMenu {
-        if !self.editable {
-            return menu;
-        }
         let table = cx.entity().downgrade();
-        let update = move |f: fn(&mut DataRows, usize, Option<usize>), col: Option<usize>| {
+        let act = |f: Box<dyn Fn(&mut DataRows)>| {
             let table = table.clone();
             move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                 table
                     .update(cx, |t, cx| {
-                        f(t.delegate_mut(), row_ix, col);
+                        f(t.delegate_mut());
                         t.refresh(cx);
                         cx.notify();
                     })
@@ -343,27 +400,53 @@ impl TableDelegate for DataRows {
             }
         };
         let source = self.source(row_ix);
+        let cell = self
+            .selected
+            .filter(|(row, _)| *row == row_ix)
+            .map(|(_, col)| col);
+        let mut menu = menu;
+
+        // Related rows: drill down to children, or open a referenced row.
+        if matches!(source, Source::Loaded(_)) {
+            for (relation, r) in self.relations.iter().enumerate() {
+                menu = menu.item(PopupMenuItem::new(r.label.clone()).on_click(act(Box::new(
+                    move |rows| {
+                        rows.request = Some(Request::Open {
+                            row: row_ix,
+                            relation,
+                        })
+                    },
+                ))));
+            }
+        }
+        if !self.editable {
+            return menu;
+        }
+        if !self.relations.is_empty() {
+            menu = menu.separator();
+        }
+        if let Some(col) = cell.filter(|&c| self.can_edit(row_ix, c)) {
+            if let Some(table) = self.data[col].picks_from.clone() {
+                menu = menu.item(
+                    PopupMenuItem::new(format!("Choose from {table}…")).on_click(act(Box::new(
+                        move |rows| rows.request = Some(Request::Pick { row: row_ix, col }),
+                    ))),
+                );
+            }
+            menu = menu.item(
+                PopupMenuItem::new(format!("Set {} to NULL", self.data[col].label))
+                    .on_click(act(Box::new(move |rows| rows.set(row_ix, col, None)))),
+            );
+        }
         let delete_label = match source {
             Source::New(_) => "Remove new row",
             Source::Loaded(i) if self.deleted.contains(&i) => "Keep row",
             Source::Loaded(_) => "Delete row",
         };
-        let cell = self
-            .selected
-            .filter(|(row, _)| *row == row_ix)
-            .map(|(_, col)| col);
-        menu.when_some(cell, |menu, col| {
-            menu.item(
-                PopupMenuItem::new(format!("Set {} to NULL", self.names[col])).on_click(update(
-                    |rows, row, col| rows.set(row, col.unwrap_or(0), None),
-                    Some(col),
-                )),
-            )
-        })
-        .item(
+        menu.item(
             PopupMenuItem::new(delete_label)
                 .icon(IconName::Delete)
-                .on_click(update(|rows, row, _| rows.toggle_delete(row), None)),
+                .on_click(act(Box::new(move |rows| rows.toggle_delete(row_ix)))),
         )
     }
 
@@ -389,25 +472,28 @@ impl TableDelegate for DataRows {
 #[cfg(test)]
 mod tests {
     use savoia_core::edit::Change;
-    use savoia_core::{ColumnInfo, TableInfo, TableKind};
 
-    use super::{DataRows, is_numeric_type};
+    use super::{DataRows, GridColumn, is_numeric_type};
+
+    fn column(label: &str, base: bool) -> GridColumn {
+        GridColumn {
+            label: label.into(),
+            base: base.then(|| label.into()),
+            numeric: false,
+            picks_from: None,
+        }
+    }
 
     fn rows() -> DataRows {
-        let mut info = TableInfo::new("t", TableKind::Table);
-        info.columns = ["id", "name"]
-            .iter()
-            .map(|c| ColumnInfo {
-                name: (*c).into(),
-                data_type: "text".into(),
-                nullable: true,
-                default: None,
-            })
-            .collect();
-        let mut rows = DataRows::new(&info, &["id".into()], true);
+        let columns = vec![
+            column("id", true),
+            column("name", true),
+            column("customer › name", false),
+        ];
+        let mut rows = DataRows::new(columns, &["id".into()], true);
         rows.rows = vec![
-            Box::new([Some("1".into()), Some("a".into())]),
-            Box::new([Some("2".into()), None]),
+            Box::new([Some("1".into()), Some("a".into()), Some("x".into())]),
+            Box::new([Some("2".into()), None, None]),
         ];
         rows
     }
@@ -435,6 +521,15 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn related_columns_never_edit() {
+        let mut rows = rows();
+        assert!(!rows.can_edit(0, 2));
+        rows.set(0, 2, Some("y".into()));
+        assert!(!rows.has_changes());
+        assert_eq!(rows.values(1, &[0, 2]), Some(vec![Some("2".into()), None]));
     }
 
     #[test]

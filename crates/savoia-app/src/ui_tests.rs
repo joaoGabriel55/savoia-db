@@ -1137,7 +1137,7 @@ async fn postgres_data_view_pages_sorts_and_filters(cx: &mut TestAppContext) {
     let (_, view) = cx
         .update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| DataView::new(ds.clone(), node("savoia"), window, cx))
+                cx.new(|cx| DataView::new(ds.clone(), node("savoia"), Vec::new(), window, cx))
             })
         })
         .expect("window");
@@ -1170,7 +1170,7 @@ async fn postgres_data_view_pages_sorts_and_filters(cx: &mut TestAppContext) {
     view.update(cx, |v, cx| {
         v.push_filter(
             savoia_core::data_query::Filter {
-                column: "name".into(),
+                column: savoia_core::data_query::Source::Base("name".into()),
                 op: savoia_core::data_query::Op::Contains,
                 value: "R 44".into(),
             },
@@ -1183,7 +1183,7 @@ async fn postgres_data_view_pages_sorts_and_filters(cx: &mut TestAppContext) {
     let (_, other) = cx
         .update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| DataView::new(ds.clone(), node("postgres"), window, cx))
+                cx.new(|cx| DataView::new(ds.clone(), node("postgres"), Vec::new(), window, cx))
             })
         })
         .expect("window");
@@ -1244,7 +1244,7 @@ async fn data_view_edits_and_commits(url: &str, cx: &mut TestAppContext) {
     let (window, view) = cx
         .update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| DataView::new(ds.clone(), node, window, cx))
+                cx.new(|cx| DataView::new(ds.clone(), node, Vec::new(), window, cx))
             })
         })
         .expect("window");
@@ -1336,4 +1336,277 @@ async fn mysql_data_view_edits_and_commits(cx: &mut TestAppContext) {
     if let Ok(url) = std::env::var("SAVOIA_MYSQL_URL") {
         data_view_edits_and_commits(&url, cx).await;
     }
+}
+
+const REL_SCHEMA: &str = "DROP SCHEMA IF EXISTS it_rel CASCADE;
+    CREATE SCHEMA it_rel;
+    CREATE TABLE it_rel.countries (code char(2) PRIMARY KEY, name text NOT NULL);
+    CREATE TABLE it_rel.customers (
+      id int PRIMARY KEY, name text NOT NULL,
+      country_code char(2) REFERENCES it_rel.countries (code));
+    CREATE TABLE it_rel.orders (
+      id int PRIMARY KEY, customer_id int REFERENCES it_rel.customers (id), total numeric);
+    CREATE TABLE it_rel.order_items (
+      order_id int REFERENCES it_rel.orders (id), qty int, PRIMARY KEY (order_id, qty));
+    INSERT INTO it_rel.countries VALUES ('IT', 'Italy'), ('FR', 'France');
+    INSERT INTO it_rel.customers VALUES (1, 'Juve', 'IT'), (2, 'PSG', 'FR'), (3, 'Toro', 'IT');
+    INSERT INTO it_rel.orders VALUES (10, 1, 5), (11, 2, 7), (12, NULL, 1), (13, 3, 2);
+    INSERT INTO it_rel.order_items VALUES (10, 1), (10, 2), (11, 5), (13, 4);";
+
+/// Lookup and summary columns keep one row per order; filters and sorts
+/// work on them; the row menu opens parents and children; FK cells pick
+/// values by name.
+#[gpui_kit::test]
+async fn postgres_data_view_follows_relationships(cx: &mut TestAppContext) {
+    use savoia_core::data_query::{Agg, Children, Filter, Hop, Op, Source};
+
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    let session = session_of(cx, &ds).expect("connected");
+    exec(session.clone(), REL_SCHEMA);
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_rel".into(),
+        table: Some("orders".into()),
+    };
+    let (window, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| DataView::new(ds.clone(), node, Vec::new(), window, cx))
+            })
+        })
+        .expect("window");
+    let opened = Rc::new(RefCell::new(Vec::new()));
+    cx.update(|cx| {
+        let opened = opened.clone();
+        cx.subscribe(&view, move |_, event, _| {
+            if let crate::data_view::DataViewEvent::Open { node, filters } = event {
+                opened
+                    .borrow_mut()
+                    .push((node.table.clone(), filters.clone()));
+            }
+        })
+        .detach();
+    });
+    wait_until(cx, "the rows and relations", |cx| {
+        view.read_with(cx, |v, cx| {
+            v.rows(cx) == Some((4, false)) && v.links().len() == 2
+        })
+    });
+
+    let customer = Hop {
+        columns: vec!["customer_id".into()],
+        schema: "it_rel".into(),
+        table: "customers".into(),
+        ref_columns: vec!["id".into()],
+    };
+    let country = Hop {
+        columns: vec!["country_code".into()],
+        schema: "it_rel".into(),
+        table: "countries".into(),
+        ref_columns: vec!["code".into()],
+    };
+    let items = Children {
+        schema: "it_rel".into(),
+        table: "order_items".into(),
+        columns: vec!["order_id".into()],
+        ref_columns: vec!["id".into()],
+    };
+    let country_name = Source::Lookup {
+        path: vec![customer.clone(), country],
+        column: "name".into(),
+    };
+    let item_count = Source::Summary {
+        children: items.clone(),
+        agg: Agg::Count,
+        column: None,
+    };
+    for source in [
+        Source::Lookup {
+            path: vec![customer],
+            column: "name".into(),
+        },
+        country_name.clone(),
+        item_count.clone(),
+        Source::Summary {
+            children: items,
+            agg: Agg::Sum,
+            column: Some("qty".into()),
+        },
+    ] {
+        cx.update_window(window, |_, window, cx| {
+            view.update(cx, |v, cx| v.toggle_column(source, window, cx))
+        })
+        .unwrap();
+    }
+    wait_until(cx, "the related columns", |cx| {
+        view.read_with(cx, |v, cx| v.rows(cx) == Some((4, false)))
+    });
+    let table = |cx: &mut TestAppContext| {
+        view.read_with(cx, |v, cx| {
+            let grid = v.grid().unwrap();
+            let rows = grid.read(cx).delegate();
+            (0..rows.len())
+                .map(|i| {
+                    rows.row(i)
+                        .iter()
+                        .map(|c| c.as_deref().unwrap_or("NULL").to_owned())
+                        .collect::<Vec<_>>()
+                        .join("|")
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(
+        table(cx),
+        [
+            "10|1|5|Juve|Italy|2|3",
+            "11|2|7|PSG|France|1|5",
+            "12|NULL|1|NULL|NULL|0|NULL",
+            "13|3|2|Toro|Italy|1|4",
+        ],
+        "one row per order, orders without a customer kept"
+    );
+
+    // Filter on a lookup, sort on a summary.
+    view.update(cx, |v, cx| {
+        v.push_filter(
+            Filter {
+                column: country_name,
+                op: Op::Eq,
+                value: "Italy".into(),
+            },
+            cx,
+        );
+        v.sort_by(Some((5, true)), cx);
+    });
+    wait_until(cx, "the filtered rows", |cx| {
+        view.read_with(cx, |v, cx| v.rows(cx) == Some((2, false)))
+    });
+    assert_eq!(
+        table(cx),
+        ["10|1|5|Juve|Italy|2|3", "13|3|2|Toro|Italy|1|4"]
+    );
+
+    // Row menu: the order's customer, then its items.
+    view.update(cx, |v, cx| {
+        v.open_related(0, 0, cx);
+        v.open_related(0, 1, cx);
+    });
+    let opened = opened.borrow().clone();
+    assert_eq!(
+        opened,
+        [
+            (
+                Some("customers".to_string()),
+                vec![Filter {
+                    column: Source::Base("id".into()),
+                    op: Op::Eq,
+                    value: "1".into()
+                }]
+            ),
+            (
+                Some("order_items".to_string()),
+                vec![Filter {
+                    column: Source::Base("order_id".into()),
+                    op: Op::Eq,
+                    value: "10".into()
+                }]
+            ),
+        ]
+    );
+
+    // The customer picker searches by name and hands back the id.
+    let picked = Rc::new(RefCell::new(None));
+    let picker = cx
+        .update_window(window, |_, window, cx| {
+            let picked = picked.clone();
+            cx.new(|cx| {
+                crate::data_pickers::RowPicker::new(
+                    session.clone(),
+                    savoia_core::Engine::Postgres,
+                    "it_rel".into(),
+                    "customers".into(),
+                    "id".into(),
+                    "name".into(),
+                    Rc::new(move |value, _, _| *picked.borrow_mut() = Some(value)),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    wait_until(cx, "the picker rows", |cx| {
+        picker.read_with(cx, |p, _| p.rows().len() == 3)
+    });
+    cx.update_window(window, |_, window, cx| {
+        picker.update(cx, |p, cx| p.pick(1, window, cx))
+    })
+    .unwrap();
+    assert_eq!(
+        *picked.borrow(),
+        Some(Some("2".to_string())),
+        "PSG, by name order"
+    );
+}
+
+/// "Join another table…" preselects the likely column pair and warns when
+/// the target column isn't unique.
+#[gpui_kit::test]
+async fn join_dialog_suggests_a_pair(cx: &mut TestAppContext) {
+    use savoia_core::{ColumnInfo, TableInfo, TableKind};
+
+    let (_, _, window) = mount(cx);
+    let table = |name: &str, columns: &[&str], pk: &str| {
+        let mut t = TableInfo::new(name, TableKind::Table);
+        t.columns = columns
+            .iter()
+            .map(|c| ColumnInfo {
+                name: (*c).into(),
+                data_type: "integer".into(),
+                nullable: true,
+                default: None,
+            })
+            .collect();
+        t.primary_key = vec![pk.into()];
+        Arc::new(t)
+    };
+    let orders = table("orders", &["id", "region", "customer_id"], "id");
+    let tables = vec![
+        (
+            "shop".to_string(),
+            table("customers", &["id", "name"], "id"),
+        ),
+        (
+            "shop".to_string(),
+            table("regions", &["code", "region"], "code"),
+        ),
+    ];
+    let dialog = cx
+        .update_window(window, |_, window, cx| {
+            cx.new(|cx| {
+                crate::data_pickers::JoinDialog::new(
+                    orders,
+                    tables,
+                    Rc::new(|_, _, _| {}),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    let (hop, unique) = dialog.read_with(cx, |d, cx| d.hop(cx)).expect("a pair");
+    assert_eq!(
+        (hop.columns, hop.table, hop.ref_columns, unique),
+        (
+            vec!["customer_id".to_string()],
+            "customers".to_string(),
+            vec!["id".to_string()],
+            true
+        )
+    );
 }

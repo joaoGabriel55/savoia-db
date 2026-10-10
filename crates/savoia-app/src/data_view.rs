@@ -7,8 +7,14 @@
 //! edit on double-click, rows are added and deleted, and the pending
 //! changes are reviewed as SQL and committed in one transaction. See
 //! `docs/adr/202610091908-write-data-edits-as-generated-sql-in-one-previewed-transaction.md`.
-//! See `docs/adr/202610091908-add-a-no-sql-data-view-with-visual-joins-to-v1.md`.
+//!
+//! "+ Column" adds columns of related tables: lookups through foreign keys
+//! and summaries of child rows, so a row stays one row of this table. The
+//! row menu opens referenced or child rows in another view. See
+//! `docs/adr/202610091908-build-joins-from-foreign-key-relationship-paths.md`.
 
+use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::assets::IconName as Lucide;
@@ -23,13 +29,15 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use savoia_core::data_query::{Filter, Op, PAGE_SIZE, TableQuery};
+use savoia_core::data_query::{Agg, Filter, Hop, Op, PAGE_SIZE, Source, TableQuery};
 use savoia_core::edit::EditTarget;
 use savoia_core::{ConnectionId, Engine, TableInfo, TableKind};
 
-use crate::data_grid::{DataRows, Request, Source};
+use crate::data_grid::{self, DataRows, GridColumn, Request, Source as RowSource};
+use crate::data_pickers::{ColumnPicker, JoinDialog, RowPicker};
 use crate::data_sources::DataSources;
 use crate::explorer::NodeRef;
+use crate::relations::{self, Link, Tables};
 use crate::{runtime, session};
 
 pub enum DataViewEvent {
@@ -38,6 +46,8 @@ pub enum DataViewEvent {
         connection: ConnectionId,
         sql: String,
     },
+    /// Open another table's rows, filtered: related rows of a row here.
+    Open { node: NodeRef, filters: Vec<Filter> },
 }
 
 enum State {
@@ -46,7 +56,7 @@ enum State {
     Ready {
         info: Arc<TableInfo>,
         grid: Entity<TableState<DataRows>>,
-        query: TableQuery,
+        query: Box<TableQuery>,
     },
 }
 
@@ -65,7 +75,18 @@ pub struct DataView {
     filter_column: Option<Entity<Choice>>,
     filter_op: Entity<Choice>,
     filter_value: Entity<InputState>,
+    /// Filters the view opens with.
+    initial_filters: Vec<Filter>,
+    /// Details of the tables around this one: the rest of its schema, and
+    /// the tables its foreign keys reach.
+    related: Tables,
+    /// Relations the user added with "Join another table…".
+    custom: Vec<Hop>,
+    /// Related rows the row menu opens.
+    links: Vec<Link>,
     _load: Option<Task<()>>,
+    _related: Option<Task<()>>,
+    _grid: Vec<Subscription>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -75,6 +96,7 @@ impl DataView {
     pub fn new(
         data_sources: Entity<DataSources>,
         node: NodeRef,
+        filters: Vec<Filter>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -105,7 +127,13 @@ impl DataView {
             filter_column: None,
             filter_op,
             filter_value,
+            initial_filters: filters,
+            related: Tables::new(),
+            custom: Vec::new(),
+            links: Vec::new(),
             _load: None,
+            _related: None,
+            _grid: Vec::new(),
             _subscriptions: subscriptions,
         };
         this.load_table(window, cx);
@@ -224,19 +252,15 @@ impl DataView {
             engine,
             container: self.node.schema.clone(),
             table: info.name.clone(),
-            columns: info.columns.iter().map(|c| c.name.clone()).collect(),
-            filters: Vec::new(),
+            columns: info
+                .columns
+                .iter()
+                .map(|c| Source::Base(c.name.clone()))
+                .collect(),
+            filters: std::mem::take(&mut self.initial_filters),
             sort: None,
             key,
         };
-        let names = SearchableVec::new(
-            info.columns
-                .iter()
-                .map(|c| SharedString::from(c.name.clone()))
-                .collect::<Vec<_>>(),
-        );
-        self.filter_column =
-            Some(cx.new(|cx| SelectState::new(names, Some(IndexPath::new(0)), window, cx)));
         let read_only_source = self
             .data_sources
             .read(cx)
@@ -251,26 +275,395 @@ impl DataView {
         } else {
             None
         };
-        let editable = self.read_only.is_none();
-        let rows = DataRows::new(&info, &query.key, editable);
+        let grid = self.new_grid(&info, &query, window, cx);
+        self.state = State::Ready {
+            info,
+            grid,
+            query: Box::new(query),
+        };
+        self.load_related(window, cx);
+        self.reload(cx);
+    }
+
+    /// A grid for `query`'s columns, with the filter column choices to match.
+    fn new_grid(
+        &mut self,
+        info: &TableInfo,
+        query: &TableQuery,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TableState<DataRows>> {
+        let columns: Vec<GridColumn> = query
+            .columns
+            .iter()
+            .map(|source| self.grid_column(info, source))
+            .collect();
+        let labels = SearchableVec::new(
+            columns
+                .iter()
+                .map(|c| SharedString::from(c.label.clone()))
+                .collect::<Vec<_>>(),
+        );
+        self.filter_column =
+            Some(cx.new(|cx| SelectState::new(labels, Some(IndexPath::new(0)), window, cx)));
+        let mut rows = DataRows::new(columns, &query.key, self.read_only.is_none());
+        rows.relations = self.row_relations(query);
         let grid = cx.new(|cx| {
             TableState::new(rows, window, cx)
                 .cell_selectable(true)
                 .row_header(false)
         });
-        self._subscriptions
-            .push(cx.observe_in(&grid, window, Self::on_grid));
-        self._subscriptions
-            .push(cx.subscribe_in(&grid, window, Self::on_table_event));
-        self.state = State::Ready { info, grid, query };
-        self.reload(cx);
+        self._grid = vec![
+            cx.observe_in(&grid, window, Self::on_grid),
+            cx.subscribe_in(&grid, window, Self::on_table_event),
+        ];
+        grid
+    }
+
+    fn grid_column(&self, info: &TableInfo, source: &Source) -> GridColumn {
+        let column_type = |schema: &str, table: &str, column: &str| {
+            self.related
+                .get(&(schema.to_owned(), table.to_owned()))
+                .and_then(|t| t.columns.iter().find(|c| c.name == column))
+                .map(|c| c.data_type.clone())
+        };
+        let (numeric, picks_from) = match source {
+            Source::Base(name) => {
+                let numeric = info
+                    .columns
+                    .iter()
+                    .find(|c| &c.name == name)
+                    .is_some_and(|c| data_grid::is_numeric_type(&c.data_type));
+                let picks = info
+                    .foreign_keys
+                    .iter()
+                    .find(|fk| fk.columns == [name.clone()])
+                    .map(|fk| fk.ref_table.clone());
+                (numeric, picks)
+            }
+            Source::Lookup { path, column } => {
+                let hop = path.last().expect("paths are not empty");
+                let t = column_type(&hop.schema, &hop.table, column);
+                (t.is_some_and(|t| data_grid::is_numeric_type(&t)), None)
+            }
+            Source::Summary {
+                children,
+                agg,
+                column,
+            } => {
+                let numeric_column = column
+                    .as_deref()
+                    .and_then(|c| column_type(&children.schema, &children.table, c))
+                    .is_some_and(|t| data_grid::is_numeric_type(&t));
+                let numeric = match agg {
+                    Agg::Count | Agg::Sum | Agg::Avg => true,
+                    Agg::Min | Agg::Max => numeric_column,
+                    Agg::List => false,
+                };
+                (numeric, None)
+            }
+        };
+        GridColumn {
+            label: source.label(),
+            base: source.base().map(str::to_owned),
+            numeric,
+            picks_from,
+        }
+    }
+
+    /// The links whose base columns are all shown, with their grid columns.
+    fn row_relations(&self, query: &TableQuery) -> Vec<data_grid::Relation> {
+        self.links
+            .iter()
+            .filter_map(|link| {
+                let columns = link
+                    .base
+                    .iter()
+                    .map(|b| {
+                        query
+                            .columns
+                            .iter()
+                            .position(|s| s.base() == Some(b.as_str()))
+                    })
+                    .collect::<Option<Vec<usize>>>()?;
+                Some(data_grid::Relation {
+                    label: link.label.clone(),
+                    columns,
+                })
+            })
+            .collect()
+    }
+
+    /// Loads the details of the tables around this one (its whole schema,
+    /// and tables in other schemas its foreign keys reach), then refreshes
+    /// the row menu's links.
+    fn load_related(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let State::Ready { info, .. } = &self.state else {
+            return;
+        };
+        let Some(session) = self.data_sources.read(cx).session(self.node.connection) else {
+            return;
+        };
+        let (database, schema) = (self.node.database.clone(), self.node.schema.clone());
+        let engine = self.engine(cx);
+        let elsewhere: Vec<(String, String)> = info
+            .foreign_keys
+            .iter()
+            .filter(|fk| fk.ref_schema != schema)
+            .map(|fk| (fk.ref_schema.clone(), fk.ref_table.clone()))
+            .collect();
+        let io = runtime::spawn(async move {
+            let mut tables = Tables::new();
+            for table in session.describe_schema(&database, &schema).await? {
+                tables.insert((schema.clone(), table.name.clone()), Arc::new(table));
+            }
+            for (other, table) in elsewhere {
+                // On MySQL the schema is the database.
+                let db = if engine == Engine::Mysql {
+                    other.clone()
+                } else {
+                    database.clone()
+                };
+                if let Ok(info) = session.describe_table(&db, &other, &table).await {
+                    tables.insert((other, table), info);
+                }
+            }
+            Ok(tables)
+        });
+        self._related = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = session::join(io).await;
+            this.update(cx, |this, cx| {
+                if let Ok(tables) = result {
+                    this.related = tables;
+                    this.refresh_links(cx);
+                }
+            })
+            .ok();
+        }));
+    }
+
+    fn refresh_links(&mut self, cx: &mut Context<Self>) {
+        let State::Ready { info, grid, query } = &self.state else {
+            return;
+        };
+        self.links = relations::links(&self.node.schema, info, &self.related, &self.custom);
+        let relations = self.row_relations(query);
+        grid.update(cx, |g, cx| {
+            g.delegate_mut().relations = relations;
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// Adds a column to the view, or removes it. Key columns always stay.
+    pub fn toggle_column(&mut self, source: Source, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .grid_entity()
+            .is_some_and(|g| g.read(cx).delegate().has_changes())
+        {
+            self.error = Some("Commit or discard your changes first.".into());
+            cx.notify();
+            return;
+        }
+        let State::Ready { info, query, .. } = &mut self.state else {
+            return;
+        };
+        match query.columns.iter().position(|s| *s == source) {
+            Some(ix) => {
+                let is_key = source
+                    .base()
+                    .is_some_and(|b| query.key.iter().any(|k| k == b));
+                if is_key || query.columns.len() == 1 {
+                    return;
+                }
+                query.columns.remove(ix);
+                if query.sort.as_ref().is_some_and(|(s, _)| *s == source) {
+                    query.sort = None;
+                }
+            }
+            None => query.columns.push(source),
+        }
+        let (info, query) = (info.clone(), query.clone());
+        let grid = self.new_grid(&info, &query, window, cx);
+        if let State::Ready { grid: slot, .. } = &mut self.state {
+            *slot = grid;
+        }
+        self.load_page(true, cx);
+    }
+
+    fn show_columns(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let State::Ready { info, query, .. } = &self.state else {
+            return;
+        };
+        let sections = relations::sections(&self.node.schema, info, &self.related, &self.custom);
+        let chosen: HashSet<Source> = query.columns.iter().cloned().collect();
+        let view = cx.entity().downgrade();
+        let join_view = view.clone();
+        let picker = cx.new(|cx| {
+            ColumnPicker::new(
+                sections,
+                chosen,
+                Rc::new(move |source, window, cx| {
+                    view.update(cx, |v, cx| v.toggle_column(source, window, cx))
+                        .ok();
+                }),
+                Rc::new(move |window, cx| {
+                    join_view.update(cx, |v, cx| v.show_join(window, cx)).ok();
+                }),
+                window,
+                cx,
+            )
+        });
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog.title("Columns").w(px(520.)).child(picker.clone())
+        });
+    }
+
+    fn show_join(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let State::Ready { info, .. } = &self.state else {
+            return;
+        };
+        let mut tables: Vec<(String, Arc<TableInfo>)> = self
+            .related
+            .iter()
+            .filter(|((_, t), _)| t != &info.name)
+            .map(|((s, _), t)| (s.clone(), t.clone()))
+            .collect();
+        tables.sort_by(|a, b| (&a.0, &a.1.name).cmp(&(&b.0, &b.1.name)));
+        let base = info.clone();
+        let view = cx.entity().downgrade();
+        let dialog = cx.new(|cx| {
+            JoinDialog::new(
+                base,
+                tables,
+                Rc::new(move |hop, window, cx| {
+                    view.update(cx, |v, cx| v.add_join(hop, window, cx)).ok();
+                }),
+                window,
+                cx,
+            )
+        });
+        window.open_dialog(cx, move |d, _, _| {
+            d.title("Join another table")
+                .w(px(520.))
+                .child(dialog.clone())
+        });
+    }
+
+    /// Adds a relation the catalog doesn't declare, then reopens the
+    /// column picker on it.
+    pub fn add_join(&mut self, hop: Hop, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.custom.contains(&hop) {
+            self.custom.push(hop);
+        }
+        self.refresh_links(cx);
+        self.show_columns(window, cx);
+    }
+
+    /// Opens the rows related to a grid row in another view.
+    pub(crate) fn open_related(&mut self, row: usize, relation: usize, cx: &mut Context<Self>) {
+        let Some(grid) = self.grid_entity() else {
+            return;
+        };
+        let rows = grid.read(cx).delegate();
+        let Some(r) = rows.relations.get(relation) else {
+            return;
+        };
+        let Some(link) = self.links.iter().find(|l| l.label == r.label).cloned() else {
+            return;
+        };
+        let Some(values) = rows.values(row, &r.columns) else {
+            return;
+        };
+        let filters = link
+            .target
+            .iter()
+            .zip(values)
+            .map(|(column, value)| match value {
+                Some(value) => Filter {
+                    column: Source::Base(column.clone()),
+                    op: Op::Eq,
+                    value,
+                },
+                None => Filter {
+                    column: Source::Base(column.clone()),
+                    op: Op::IsNull,
+                    value: String::new(),
+                },
+            })
+            .collect();
+        let node = NodeRef {
+            connection: self.node.connection,
+            database: if self.engine(cx) == Engine::Mysql {
+                link.schema.clone()
+            } else {
+                self.node.database.clone()
+            },
+            schema: link.schema,
+            table: Some(link.table),
+        };
+        cx.emit(DataViewEvent::Open { node, filters });
+    }
+
+    /// Lets the user pick a foreign-key cell's value from the referenced
+    /// table, by its display column.
+    fn pick_value(&mut self, row: usize, col: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let State::Ready { info, query, grid } = &self.state else {
+            return;
+        };
+        let Some(base) = query.columns.get(col).and_then(Source::base) else {
+            return;
+        };
+        let Some(fk) = info
+            .foreign_keys
+            .iter()
+            .find(|fk| fk.columns == [base.to_owned()])
+        else {
+            return;
+        };
+        let Some(session) = self.data_sources.read(cx).session(self.node.connection) else {
+            return;
+        };
+        let target = self
+            .related
+            .get(&(fk.ref_schema.clone(), fk.ref_table.clone()))
+            .cloned();
+        let display = target
+            .as_deref()
+            .and_then(relations::display_column)
+            .unwrap_or_else(|| fk.ref_columns[0].clone());
+        let grid = grid.downgrade();
+        let picker = cx.new(|cx| {
+            RowPicker::new(
+                session,
+                query.engine,
+                fk.ref_schema.clone(),
+                fk.ref_table.clone(),
+                fk.ref_columns[0].clone(),
+                display,
+                Rc::new(move |value, _, cx| {
+                    grid.update(cx, |g, cx| {
+                        g.delegate_mut().set(row, col, value);
+                        g.refresh(cx);
+                        cx.notify();
+                    })
+                    .ok();
+                }),
+                window,
+                cx,
+            )
+        });
+        let title = format!("Choose from {}", fk.ref_table);
+        window.open_dialog(cx, move |d, _, _| {
+            d.title(title.clone()).w(px(480.)).child(picker.clone())
+        });
     }
 
     /// Takes the grid's request: a sort or the next page.
     fn on_grid(
         &mut self,
         grid: Entity<TableState<DataRows>>,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(request) = grid.update(cx, |g, _| g.delegate_mut().request.take()) else {
@@ -278,12 +671,14 @@ impl DataView {
         };
         match request {
             Request::Sort(sort) => {
-                if let State::Ready { info, query, .. } = &mut self.state {
-                    query.sort = sort.map(|(col, desc)| (info.columns[col].name.clone(), desc));
+                if let State::Ready { query, .. } = &mut self.state {
+                    query.sort = sort.map(|(col, desc)| (query.columns[col].clone(), desc));
                 }
                 self.reload(cx);
             }
             Request::More => self.load_page(false, cx),
+            Request::Open { row, relation } => self.open_related(row, relation, cx),
+            Request::Pick { row, col } => self.pick_value(row, col, window, cx),
         }
     }
 
@@ -324,7 +719,7 @@ impl DataView {
             return;
         };
         let rows = grid.read(cx).delegate();
-        let deleted = matches!(rows.source(row), Source::Loaded(i) if rows.deleted.contains(&i));
+        let deleted = matches!(rows.source(row), RowSource::Loaded(i) if rows.deleted.contains(&i));
         if !rows.editable || deleted {
             return;
         }
@@ -375,6 +770,11 @@ impl DataView {
     #[cfg(test)]
     pub fn is_committing(&self) -> bool {
         self.committing
+    }
+
+    #[cfg(test)]
+    pub fn links(&self) -> &[Link] {
+        &self.links
     }
 
     pub fn add_row(&mut self, cx: &mut Context<Self>) {
@@ -601,14 +1001,14 @@ impl DataView {
         let Some(column_choice) = &self.filter_column else {
             return;
         };
-        let State::Ready { info, query, .. } = &mut self.state else {
+        let State::Ready { query, .. } = &mut self.state else {
             return;
         };
         let column = column_choice
             .read(cx)
             .selected_index(cx)
-            .and_then(|ix| info.columns.get(ix.row))
-            .map(|c| c.name.clone());
+            .and_then(|ix| query.columns.get(ix.row))
+            .cloned();
         let op = self
             .filter_op
             .read(cx)
@@ -640,8 +1040,8 @@ impl DataView {
     /// Sorts by a data column (0-based) on the server, as a header click does.
     #[cfg(test)]
     pub fn sort_by(&mut self, column: Option<(usize, bool)>, cx: &mut Context<Self>) {
-        if let State::Ready { info, query, .. } = &mut self.state {
-            query.sort = column.map(|(col, desc)| (info.columns[col].name.clone(), desc));
+        if let State::Ready { query, .. } = &mut self.state {
+            query.sort = column.map(|(col, desc)| (query.columns[col].clone(), desc));
         }
         self.reload(cx);
     }
@@ -718,6 +1118,17 @@ impl DataView {
                 )
             })
             .child(div().flex_1())
+            .when(self.filter_column.is_some(), |bar| {
+                bar.child(
+                    Button::new("add-column")
+                        .ghost()
+                        .xsmall()
+                        .icon(Icon::new(Lucide::Columns3))
+                        .label("Columns")
+                        .tooltip("Add columns, from this table or related ones")
+                        .on_click(cx.listener(|this, _, window, cx| this.show_columns(window, cx))),
+                )
+            })
             .when(
                 self.read_only.is_none() && self.filter_column.is_some(),
                 |bar| {
@@ -830,9 +1241,9 @@ impl DataView {
         let theme = cx.theme().clone();
         let chips = query.filters.iter().enumerate().map(|(ix, f)| {
             let text = if f.op.takes_value() {
-                format!("{} {} '{}'", f.column, f.op.label(), f.value)
+                format!("{} {} '{}'", f.column.label(), f.op.label(), f.value)
             } else {
-                format!("{} {}", f.column, f.op.label())
+                format!("{} {}", f.column.label(), f.op.label())
             };
             h_flex()
                 .gap_1()
