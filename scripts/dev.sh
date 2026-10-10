@@ -3,6 +3,7 @@
 #
 #   scripts/dev.sh                          # reconnect the last-used data source
 #   SAVOIA_DEV_OPEN=it_rel.orders scripts/dev.sh   # …and reopen that table's data view
+#   SAVOIA_DEV_TRANSFER=export SAVOIA_DEV_OPEN=it_rel scripts/dev.sh   # …or the dump wizard
 #
 # A failed build leaves the running app alone, so a typo never closes it.
 # Uses watchexec when installed (`brew install watchexec`), else polls.

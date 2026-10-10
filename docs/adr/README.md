@@ -68,3 +68,4 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Build joins from foreign-key relationship paths](./202610091908-build-joins-from-foreign-key-relationship-paths.md) | Accepted |
 | 2026-10-09 | [Write data edits as generated SQL in one previewed transaction](./202610091908-write-data-edits-as-generated-sql-in-one-previewed-transaction.md) | Accepted |
 | 2026-10-09 | [Detect installed dump tools instead of bundling them](./202610092308-detect-installed-dump-tools-instead-of-bundling-them.md) | Accepted |
+| 2026-10-09 | [Write built-in dumps as plain SQL from one snapshot](./202610092329-write-built-in-dumps-as-plain-sql-from-one-snapshot.md) | Proposed |

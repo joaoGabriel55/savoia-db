@@ -6,7 +6,8 @@ use std::sync::{Arc, RwLock};
 
 use savoia_core::{
     AppError, AppResult, Catalog, ColumnMeta, Connection, ConnectionConfig, Driver, Endpoint,
-    Engine, QueryEvent, QueryHandle, Row, SchemaNode, Secrets, ServerInfo, TableInfo,
+    Engine, QueryEvent, QueryHandle, Row, SchemaNode, SchemaObjects, Secrets, ServerInfo,
+    TableInfo,
 };
 use savoia_mysql::MysqlDriver;
 use savoia_pg::PgDriver;
@@ -238,8 +239,9 @@ impl Session {
     }
 
     /// Waits for the gate, then loads the object names of one schema into
-    /// the catalog. Runs on the I/O runtime.
-    pub async fn load_objects(&self, database: &str, schema: &str) -> AppResult<()> {
+    /// the catalog, and returns them: a schema created since the catalog was
+    /// loaded isn't in it. Runs on the I/O runtime.
+    pub async fn load_objects(&self, database: &str, schema: &str) -> AppResult<SchemaObjects> {
         let objects = {
             let (conn, gate) = self.route(database);
             let _guard = gate.lock().await;
@@ -248,10 +250,10 @@ impl Session {
         let mut catalog = write(&self.catalog);
         let mut updated = Catalog::clone(&catalog);
         if let Some(node) = updated.schema_mut(database, schema) {
-            node.objects = Some(objects);
+            node.objects = Some(objects.clone());
         }
         *catalog = Arc::new(updated);
-        Ok(())
+        Ok(objects)
     }
 
     /// Waits for the gate, then loads one table's details. Runs on the I/O
@@ -351,6 +353,31 @@ impl Session {
             .await
             .map_err(|e| (None, e))?;
         Ok(())
+    }
+
+    /// Where dump tools connect to reach `database`: the session's own
+    /// endpoint, so through its SSH tunnel when it has one. The tunnel lives
+    /// as long as the session, so keep the session while a tool runs.
+    pub fn tool_endpoint(&self, database: &str) -> Endpoint {
+        Endpoint {
+            database: Some(database.to_owned()),
+            ..self.endpoint.clone()
+        }
+    }
+
+    /// The database password the session connected with.
+    pub fn password(&self) -> Option<String> {
+        self.secrets.password.clone()
+    }
+
+    /// A new connection to `database`, through the session's tunnel, for a
+    /// long transfer that mustn't hold the session's gate. Runs on the I/O
+    /// runtime.
+    pub async fn open_dedicated(&self, database: &str) -> AppResult<Arc<dyn Connection>> {
+        let conn = driver(self.endpoint.engine)
+            .connect(&self.tool_endpoint(database), &self.secrets)
+            .await?;
+        Ok(Arc::from(conn))
     }
 
     /// Whether `database` is the one this session's own connection is on,

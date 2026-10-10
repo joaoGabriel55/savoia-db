@@ -7085,6 +7085,7 @@ dependencies = [
  "savoia-mysql",
  "savoia-pg",
  "savoia-store",
+ "savoia-transfer",
  "savoia-tunnel",
  "serde_json",
  "tokio",
@@ -7142,7 +7143,11 @@ name = "savoia-transfer"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "flate2",
  "savoia-core",
+ "savoia-mysql",
+ "savoia-pg",
+ "savoia-tunnel",
  "tokio",
  "uuid",
 ]

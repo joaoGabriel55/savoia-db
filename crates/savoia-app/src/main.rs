@@ -18,6 +18,7 @@ mod session;
 mod structure;
 mod table_menu;
 mod theme;
+mod transfer;
 #[cfg(test)]
 mod ui_tests;
 mod workspace;

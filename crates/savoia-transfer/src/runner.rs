@@ -41,6 +41,20 @@ pub struct ToolCommand {
 }
 
 impl ToolCommand {
+    /// Runs `found` without connecting, e.g. `pg_restore --file` turning an
+    /// archive into a script.
+    pub fn local(found: &FoundTool) -> Self {
+        Self {
+            tool: found.tool,
+            program: found.path.clone(),
+            args: Vec::new(),
+            env: Vec::new(),
+            stdin: None,
+            stdout: None,
+            secret: None,
+        }
+    }
+
     /// Runs `found` with the connection options for `endpoint`.
     ///
     /// Postgres tools get the database from `endpoint`. MySQL's `mysqldump`
@@ -51,15 +65,7 @@ impl ToolCommand {
         endpoint: &Endpoint,
         password: Option<&str>,
     ) -> io::Result<Self> {
-        let mut command = Self {
-            tool: found.tool,
-            program: found.path.clone(),
-            args: Vec::new(),
-            env: Vec::new(),
-            stdin: None,
-            stdout: None,
-            secret: None,
-        };
+        let mut command = Self::local(found);
         match found.version.flavor {
             Flavor::Postgres => command.connect_postgres(found, endpoint, password)?,
             flavor => command.connect_mysql(flavor, endpoint, password)?,
@@ -139,7 +145,8 @@ impl ToolCommand {
         self.arg(format!("--user={}", endpoint.user));
         // Otherwise "localhost" means the Unix socket, not the endpoint's port.
         self.arg("--protocol=TCP");
-        for arg in mysql_ssl_args(flavor, endpoint.ssl) {
+        let behind_tunnel = endpoint.host != endpoint.tls_server_name;
+        for arg in mysql_ssl_args(flavor, endpoint.ssl, behind_tunnel) {
             self.arg(arg);
         }
         if self.tool == Tool::Mysql {
@@ -447,7 +454,12 @@ fn option_file_quote(value: &str) -> String {
 /// MySQL and MariaDB clients spell the TLS options differently. Recent
 /// MariaDB clients verify the certificate by default, which `Prefer` and
 /// `Require` must turn off to match the app's driver.
-fn mysql_ssl_args(flavor: Flavor, ssl: SslMode) -> Vec<String> {
+///
+/// Behind an SSH tunnel the client connects to `127.0.0.1`, and MySQL
+/// clients can't check the certificate against another host name, so
+/// `VerifyFull` verifies the chain only (`VERIFY_CA`); the tunnel itself
+/// authenticates the path to the server.
+fn mysql_ssl_args(flavor: Flavor, ssl: SslMode, behind_tunnel: bool) -> Vec<String> {
     let ca = || system_ca_bundle().map(|path| format!("--ssl-ca={}", path.display()));
     match (flavor, ssl) {
         (Flavor::Mariadb, SslMode::Disable) => vec!["--skip-ssl".into()],
@@ -464,7 +476,12 @@ fn mysql_ssl_args(flavor: Flavor, ssl: SslMode) -> Vec<String> {
         (_, SslMode::Prefer) => vec!["--ssl-mode=PREFERRED".into()],
         (_, SslMode::Require) => vec!["--ssl-mode=REQUIRED".into()],
         (_, SslMode::VerifyFull) => {
-            let mut args = vec!["--ssl-mode=VERIFY_IDENTITY".into()];
+            let mode = if behind_tunnel {
+                "VERIFY_CA"
+            } else {
+                "VERIFY_IDENTITY"
+            };
+            let mut args = vec![format!("--ssl-mode={mode}")];
             args.extend(ca());
             args
         }
@@ -676,16 +693,19 @@ mod tests {
     #[test]
     fn mariadb_clients_get_their_own_tls_options() {
         assert_eq!(
-            mysql_ssl_args(Flavor::Mariadb, SslMode::Disable),
+            mysql_ssl_args(Flavor::Mariadb, SslMode::Disable, false),
             ["--skip-ssl"]
         );
         assert_eq!(
-            mysql_ssl_args(Flavor::Mariadb, SslMode::Require),
+            mysql_ssl_args(Flavor::Mariadb, SslMode::Require, false),
             ["--ssl", "--skip-ssl-verify-server-cert"]
         );
         assert_eq!(
-            mysql_ssl_args(Flavor::Mysql, SslMode::Prefer),
+            mysql_ssl_args(Flavor::Mysql, SslMode::Prefer, false),
             ["--ssl-mode=PREFERRED"]
+        );
+        assert!(
+            mysql_ssl_args(Flavor::Mysql, SslMode::VerifyFull, true)[0] == "--ssl-mode=VERIFY_CA"
         );
     }
 

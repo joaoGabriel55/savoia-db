@@ -61,6 +61,11 @@ const MIGRATIONS: &[&str] = &[
         error         TEXT
     );
     CREATE INDEX history_by_time ON history (ran_at DESC);",
+    // App preferences by key, e.g. the directory dump tools are taken from.
+    "CREATE TABLE settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );",
 ];
 
 impl ConnectionStore {
@@ -209,6 +214,33 @@ impl ConnectionStore {
             })
         })
         .collect()
+    }
+
+    /// A preference, if set.
+    pub fn setting(&self, key: &str) -> AppResult<Option<String>> {
+        use rusqlite::OptionalExtension as _;
+        self.db
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(AppError::storage)
+    }
+
+    /// Sets a preference; `None` removes it.
+    pub fn set_setting(&self, key: &str, value: Option<&str>) -> AppResult<()> {
+        match value {
+            Some(value) => self.db.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            ),
+            None => self
+                .db
+                .execute("DELETE FROM settings WHERE key = ?1", [key]),
+        }
+        .map_err(AppError::storage)?;
+        Ok(())
     }
 
     /// Records a successful connect, for the recent list.
@@ -476,6 +508,20 @@ mod tests {
             rows: 3,
             error: None,
         }
+    }
+
+    #[test]
+    fn settings_are_set_replaced_and_removed() {
+        let store = ConnectionStore::open_in_memory().unwrap();
+        assert_eq!(store.setting("tools").unwrap(), None);
+        store.set_setting("tools", Some("/opt/pg/bin")).unwrap();
+        store.set_setting("tools", Some("/usr/local/bin")).unwrap();
+        assert_eq!(
+            store.setting("tools").unwrap().as_deref(),
+            Some("/usr/local/bin")
+        );
+        store.set_setting("tools", None).unwrap();
+        assert_eq!(store.setting("tools").unwrap(), None);
     }
 
     #[test]

@@ -13,6 +13,20 @@ pub fn split(sql: &str, engine: Engine) -> Vec<Range<usize>> {
     Splitter::new(sql, engine).run().0
 }
 
+/// [`split`] for a script read in pieces: starts with `delimiter` in effect
+/// (MySQL's `DELIMITER` may have changed it earlier in the script) and pairs
+/// each statement with the delimiter in effect where it starts.
+pub fn split_from(sql: &str, engine: Engine, delimiter: &str) -> Vec<(Range<usize>, String)> {
+    let mut splitter = Splitter::new(sql, engine);
+    splitter.delimiter = delimiter.to_owned();
+    splitter.scan();
+    splitter
+        .statements
+        .into_iter()
+        .zip(splitter.delimiters)
+        .collect()
+}
+
 /// The statement the caret at byte `offset` belongs to: the one around it,
 /// else the one ending earlier on the caret's line, else the next one, else
 /// the last one.
@@ -57,6 +71,8 @@ struct Splitter<'a> {
     /// End of the current statement's last significant byte.
     end: usize,
     statements: Vec<Range<usize>>,
+    /// The delimiter in effect for each statement in `statements`.
+    delimiters: Vec<String>,
     directives: bool,
 }
 
@@ -70,6 +86,7 @@ impl<'a> Splitter<'a> {
             start: None,
             end: 0,
             statements: Vec::new(),
+            delimiters: Vec::new(),
             directives: false,
         }
     }
@@ -79,6 +96,11 @@ impl<'a> Splitter<'a> {
     }
 
     fn run(mut self) -> (Vec<Range<usize>>, bool) {
+        self.scan();
+        (self.statements, self.directives)
+    }
+
+    fn scan(&mut self) {
         let n = self.bytes.len();
         let mut i = 0;
         while i < n {
@@ -126,12 +148,14 @@ impl<'a> Splitter<'a> {
             self.end = i;
         }
         self.finish();
-        (self.statements, self.directives)
     }
 
     fn finish(&mut self) {
         if let Some(start) = self.start.take() {
             self.statements.push(start..self.end);
+            // `DELIMITER` only applies between statements, so this is the
+            // one the statement started with.
+            self.delimiters.push(self.delimiter.clone());
         }
     }
 
@@ -258,6 +282,22 @@ fn next_char(sql: &str, i: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_from_resumes_with_a_delimiter_and_reports_each() {
+        let sql = "CREATE PROCEDURE p() BEGIN SELECT 1; END $$\nDELIMITER ;\nSELECT 2;";
+        let parts: Vec<(&str, String)> = split_from(sql, Engine::Mysql, "$$")
+            .into_iter()
+            .map(|(range, delimiter)| (&sql[range], delimiter))
+            .collect();
+        assert_eq!(
+            parts,
+            [
+                ("CREATE PROCEDURE p() BEGIN SELECT 1; END", "$$".to_owned()),
+                ("SELECT 2", ";".to_owned()),
+            ]
+        );
+    }
 
     fn texts(sql: &str, engine: Engine) -> Vec<&str> {
         split(sql, engine).into_iter().map(|r| &sql[r]).collect()

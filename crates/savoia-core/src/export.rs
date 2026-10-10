@@ -77,12 +77,10 @@ pub fn write<'a>(
                 .collect();
             let head = format!("INSERT INTO {table} ({}) VALUES", names.join(", "));
             for row in rows {
-                let values: Vec<String> = columns
-                    .iter()
-                    .zip(row.iter())
-                    .map(|(c, v)| sql_value(engine, c, v.as_deref()))
-                    .collect();
-                out.push_str(&format!("{head} ({});\n", values.join(", ")));
+                out.push_str(&format!(
+                    "{head} {};\n",
+                    insert_values(engine, columns, row)
+                ));
             }
         }
     }
@@ -169,12 +167,35 @@ fn json_string(v: &str) -> String {
     out
 }
 
+/// One row as the parenthesized value list of an `INSERT`: `(1, 'a', NULL)`.
+pub fn insert_values(engine: Engine, columns: &[ColumnMeta], row: &Row) -> String {
+    let values: Vec<String> = columns
+        .iter()
+        .zip(row.iter())
+        .map(|(c, v)| sql_value(engine, c, v.as_deref()))
+        .collect();
+    format!("({})", values.join(", "))
+}
+
 fn sql_value(engine: Engine, column: &ColumnMeta, value: Option<&str>) -> String {
     match value {
         None => "NULL".into(),
         Some(v) if column.kind.is_numeric() && is_json_number(v) => v.to_owned(),
+        // The MySQL driver renders binary values as `0x…` hex literals;
+        // an empty one is just `0x`, which MySQL doesn't parse.
+        Some("0x") if engine == Engine::Mysql && column.kind == ValueKind::Binary => "X''".into(),
+        Some(v)
+            if engine == Engine::Mysql && column.kind == ValueKind::Binary && is_hex_literal(v) =>
+        {
+            v.to_owned()
+        }
         Some(v) => quote_literal(engine, v),
     }
+}
+
+fn is_hex_literal(v: &str) -> bool {
+    v.strip_prefix("0x")
+        .is_some_and(|hex| !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 #[cfg(test)]
@@ -247,6 +268,25 @@ mod tests {
             out(Format::Insert, Engine::Postgres).lines().nth(1),
             Some("INSERT INTO \"t\" (\"id\", \"note\") VALUES (2, '');")
         );
+    }
+
+    #[test]
+    fn mysql_binary_values_stay_hex_literals() {
+        let columns = [ColumnMeta {
+            name: "data".into(),
+            type_name: "BLOB".into(),
+            kind: ValueKind::Binary,
+        }];
+        let row: Row = Box::new([Some("0x00FF".into())]);
+        assert_eq!(insert_values(Engine::Mysql, &columns, &row), "(0x00FF)");
+        assert_eq!(
+            insert_values(Engine::Postgres, &columns, &row),
+            "('0x00FF')"
+        );
+        let text: Row = Box::new([Some("0xZZ".into())]);
+        assert_eq!(insert_values(Engine::Mysql, &columns, &text), "('0xZZ')");
+        let empty: Row = Box::new([Some("0x".into())]);
+        assert_eq!(insert_values(Engine::Mysql, &columns, &empty), "(X'')");
     }
 
     #[test]
