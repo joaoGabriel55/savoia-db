@@ -65,6 +65,10 @@ SAVOIA_SSH_TEST=1 cargo test --workspace
 ```
 
 
+### Benchmarks
+
+`scripts/bench.sh startup` and `scripts/bench.sh scroll` (with `SAVOIA_PG_URL`) measure the release budgets in a real window. Results are in [docs/benchmarks/](docs/benchmarks/).
+
 ### Sample data
 
 `samples/` has a Serie A 2025-26 database for trying the explorer, ER diagram and console by hand. Clubs and stadiums are real (figures approximate); every person is invented. It has 20 clubs, 490 players, 380 fixtures (20 matchdays played, so later scores are `NULL`), views, a function, a procedure, and 150,000 `match_events` rows for paging and cancel.

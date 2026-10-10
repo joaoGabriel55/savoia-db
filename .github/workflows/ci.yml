@@ -21,6 +21,8 @@ jobs:
       - uses: ./.github/actions/setup
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The benchmarks only build with their feature; keep them compiling.
+      - run: cargo clippy -p savoia-app --features bench -- -D warnings
       - run: cargo test --workspace
 
   live:

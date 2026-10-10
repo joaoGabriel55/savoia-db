@@ -1,4 +1,6 @@
 mod assets;
+#[cfg(feature = "bench")]
+mod bench;
 mod commands;
 mod completion;
 mod connection_form;
@@ -48,10 +50,42 @@ fn main() {
                 window_min_size: Some(size(px(900.), px(560.))),
                 ..TitleBar::window_options()
             };
+            #[cfg(feature = "bench")]
+            if let Some(bench) = bench::from_env() {
+                return run_bench(bench, options, cx);
+            }
             gpui_kit::open_window(options, cx, |window, cx| {
                 cx.new(|cx| workspace::Workspace::new(window, cx))
             })
             .expect("failed to open the main window");
             cx.activate(true);
         });
+}
+
+#[cfg(feature = "bench")]
+fn run_bench(bench: bench::Bench, options: WindowOptions, cx: &mut App) {
+    match bench {
+        // The real startup path, store and all.
+        bench::Bench::Startup => {
+            gpui_kit::open_window(options, cx, |window, cx| {
+                bench::after_first_frame(window, bench::report_startup);
+                cx.new(|cx| workspace::Workspace::new(window, cx))
+            })
+            .expect("window");
+        }
+        bench::Bench::Scroll => {
+            let data_sources = bench::data_sources(cx);
+            let ds = data_sources.clone();
+            let (window, workspace) = gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| workspace::Workspace::with_data_sources(ds, window, cx))
+            })
+            .expect("window");
+            window
+                .update(cx, |_, window, cx| {
+                    bench::scroll(workspace, data_sources, window, cx)
+                })
+                .expect("window");
+        }
+    }
+    cx.activate(true);
 }

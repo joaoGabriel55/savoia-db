@@ -236,7 +236,7 @@ impl QueryConsole {
         &self.editor
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench"))]
     pub fn results(&self) -> Vec<Entity<TableState<ResultSet>>> {
         self.results.iter().map(|tab| tab.table.clone()).collect()
     }

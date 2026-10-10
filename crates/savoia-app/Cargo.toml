@@ -25,6 +25,10 @@ serde_json.workspace = true
 tokio.workspace = true
 url.workspace = true
 
+[features]
+# Release-check benchmarks in a real window; see scripts/bench.sh.
+bench = []
+
 [dev-dependencies]
 async-trait.workspace = true
 gpui-kit = { workspace = true, features = ["test-support"] }
