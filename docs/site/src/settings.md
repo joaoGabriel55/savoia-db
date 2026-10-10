@@ -9,4 +9,9 @@ Open Settings with **⌘,** (Ctrl+,) or from the command palette.
 - **Keyboard.** Every shortcut.
 - **About.** The version, links, and the Ko-fi button.
 
+<figure class="shot">
+  <img src="media/app-light.webp" width="2000" height="1265" loading="lazy" alt="Savoia Studio in the light theme: warm paper background with the green tool bands.">
+  <figcaption><em>Light</em>: the same window on Olivetti paper.</figcaption>
+</figure>
+
 Settings are saved in the app's data folder, next to your saved connections.

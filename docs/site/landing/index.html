@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Savoia Studio · a free database client</title>
+<meta name="description" content="Savoia Studio is a native desktop client for PostgreSQL and MySQL. Free: no trial, no license key, no account, no telemetry.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1F5A43">
+<meta property="og:title" content="Savoia Studio, a free database client">
+<meta property="og:description" content="A native desktop client for PostgreSQL and MySQL. No trial, no license key, no account.">
+<meta property="og:image" content="https://joaogabriel55.github.io/savoia-studio/docs/media/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="app-icon.svg" type="image/svg+xml">
+<link rel="preload" href="docs/fonts/archivo-wdth-wght.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face {
+  font-family: "Archivo";
+  src: url("docs/fonts/archivo-wdth-wght.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+}
+
+:root {
+  --ivrea: #1F5A43;
+  --ivrea-hover: #286C51;
+  --ivrea-pressed: #184634;
+  --ivrea-line: #5FB088;
+  --savoy: #1F64B4;
+  --savoy-hover: #2B74C7;
+  --savoy-pressed: #1A5498;
+  --band-ink: #F2EFE8;
+  --band-ink-muted: #B5D0C2;
+  --band-rule: #2F7458;
+  --blueprint: #10372A;
+  --canvas: #161A17;
+  --panel: #1D211E;
+  --seam: #111412;
+  --rule: #272C28;
+  --ink: #E9E6DF;
+  --ink-header: #B8BDB8;
+  --ink-muted: #8D938F;
+  --paper: #F7F6F2;
+  --paper-panel: #EEEDE7;
+  --paper-rule: #D6D4CB;
+  --paper-ink: #1C201D;
+  --paper-muted: #646B66;
+  --paper-line: #1B7650;
+
+  --display: "Archivo", system-ui, sans-serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --gutter: clamp(16px, 4vw, 56px);
+  --max: 1240px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 400 17px/1.6 var(--sans);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+img { display: block; max-width: 100%; height: auto; }
+a { color: inherit; text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
+::selection { background: var(--ivrea-line); color: var(--canvas); }
+:focus-visible { outline: 2px solid var(--ivrea-line); outline-offset: 3px; border-radius: 6px; }
+html { scrollbar-color: var(--rule) var(--canvas); }
+kbd, code { font-family: var(--mono); font-size: 0.88em; }
+kbd {
+  display: inline-block; padding: 0 6px; border: 1px solid var(--rule); border-bottom-width: 2px;
+  border-radius: 4px; background: var(--panel); color: var(--ink); line-height: 1.5;
+}
+.wrap { width: min(100% - 2 * var(--gutter), var(--max)); margin-inline: auto; }
+.skip { position: absolute; left: -999px; top: 8px; z-index: 10; background: var(--band-ink); color: var(--canvas); padding: 8px 12px; border-radius: 6px; }
+.skip:focus { left: 8px; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  min-height: 48px; padding: 0 20px;
+  border: 0; border-radius: 6px;
+  font: 600 16px/1 var(--sans); text-decoration: none; cursor: pointer;
+  transition: background-color 160ms var(--ease), transform 160ms var(--ease);
+}
+.btn svg { width: 20px; height: 20px; flex: none; }
+.btn:active { transform: translateY(1px); }
+.btn-download { background: var(--savoy); color: #fff; }
+.btn-download:hover { background: var(--savoy-hover); }
+.btn-download:active { background: var(--savoy-pressed); }
+.btn-kofi { background: var(--band-ink); color: var(--paper-ink); }
+.btn-kofi:hover { background: #fff; }
+.btn-kofi .cup { color: var(--ivrea); }
+.btn-ghost { background: transparent; color: var(--band-ink); box-shadow: inset 0 0 0 1px var(--band-rule); }
+.btn-ghost:hover { background: var(--ivrea-hover); }
+
+/* ---------- Hero: the price tag ---------- */
+.hero { background: var(--ivrea); color: var(--band-ink); position: relative; --win: min(100vw - 2 * var(--gutter), var(--max)); }
+.band {
+  height: 56px; display: flex; align-items: center; gap: 4px;
+  border-bottom: 1px solid var(--band-rule);
+}
+.mark { display: flex; align-items: center; gap: 10px; margin-right: auto; text-decoration: none; font: 700 17px/1 var(--display); font-stretch: 112%; letter-spacing: -0.01em; }
+.mark img { width: 28px; height: 28px; border-radius: 6px; box-shadow: 0 0 0 1px var(--band-rule); }
+.band a.tool {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px;
+  border-radius: 6px; text-decoration: none; font: 500 15px/1 var(--sans); color: var(--band-ink);
+}
+.band a.tool:hover { background: var(--ivrea-hover); }
+.band a.tool svg { width: 18px; height: 18px; }
+.band .sep { width: 1px; height: 16px; background: var(--band-rule); margin: 0 4px; }
+
+.tag {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(24px, 4vw, 72px);
+  align-items: end;
+  padding-top: clamp(24px, 4vh, 56px);
+}
+.price { position: relative; }
+.zero {
+  display: block;
+  font-family: var(--display); font-weight: 800; font-stretch: 125%;
+  font-size: clamp(11rem, min(40vw, 62vh), 36rem); line-height: 0.74; letter-spacing: -0.04em;
+  margin: 0 0 0 -0.04em;
+  font-variant-numeric: lining-nums;
+}
+.price-cap {
+  display: flex; justify-content: space-between; gap: 16px;
+  margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--band-rule);
+  font-size: 14px; color: var(--band-ink-muted);
+}
+.price-cap strong { color: var(--band-ink); font-weight: 600; }
+
+.offer h1 {
+  margin: 0 0 14px;
+  font-family: var(--display); font-weight: 700; font-stretch: 108%;
+  font-size: clamp(2rem, 3.6vw, 3.4rem); line-height: 1.04; letter-spacing: -0.025em;
+  text-wrap: balance; max-width: 18ch;
+}
+.offer .lede { margin: 0 0 20px; max-width: 46ch; color: var(--band-ink-muted); font-size: 18px; }
+.offer .lede strong { color: var(--band-ink); font-weight: 600; }
+
+.ledger { list-style: none; margin: 0 0 24px; padding: 0; border-top: 1px solid var(--band-rule); max-width: 560px; }
+.ledger li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 8px 0; border-bottom: 1px solid var(--band-rule);
+}
+.ledger .item { position: relative; font: 600 17px/1.3 var(--display); font-stretch: 100%; }
+.ledger .item::after {
+  content: ""; position: absolute; left: -4px; right: -4px; top: 55%; height: 2px;
+  background: var(--band-ink); transform-origin: left center;
+}
+.ledger .none { font: 400 14px/1.3 var(--sans); color: var(--band-ink-muted); text-align: right; }
+@media (prefers-reduced-motion: reduce) { .ledger .item { color: var(--band-ink-muted); } }
+@media (prefers-reduced-motion: no-preference) {
+  .ledger .item::after { transform: scaleX(0); animation: strike 520ms var(--ease) forwards; }
+  .ledger li:nth-child(1) .item::after { animation-delay: 380ms; }
+  .ledger li:nth-child(2) .item::after { animation-delay: 520ms; }
+  .ledger li:nth-child(3) .item::after { animation-delay: 660ms; }
+  .ledger li:nth-child(4) .item::after { animation-delay: 800ms; }
+  .ledger li:nth-child(5) .item::after { animation-delay: 940ms; }
+  .ledger .item { animation: settle 400ms var(--ease) 1500ms forwards; }
+  @keyframes strike { to { transform: scaleX(1); } }
+  @keyframes settle { to { color: var(--band-ink-muted); } }
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.actions .alt { font-size: 14px; color: var(--band-ink-muted); margin: 10px 0 0; width: 100%; }
+.actions .alt a { color: var(--band-ink); }
+
+.window {
+  position: relative; margin-top: clamp(24px, 3.5vh, 40px);
+  margin-bottom: calc(var(--win) * -0.3);
+}
+.window img {
+  width: 100%;
+  filter: drop-shadow(0 30px 60px rgba(8, 20, 14, 0.55)) drop-shadow(0 4px 12px rgba(8, 20, 14, 0.35));
+}
+.window-note {
+  position: absolute; right: 0; top: -30px; font-size: 13px; color: var(--band-ink-muted);
+}
+
+/* ---------- Sections on graphite ---------- */
+section { padding: clamp(80px, 12vw, 160px) 0 0; }
+.after-hero { padding-top: calc(min(100vw - 2 * var(--gutter), var(--max)) * 0.3 + clamp(72px, 9vw, 128px)); }
+.sec-head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(24px, 4vw, 72px); margin-bottom: clamp(36px, 5vw, 64px); align-items: end; }
+h2 {
+  margin: 0; font-family: var(--display); font-weight: 700; font-stretch: 112%;
+  font-size: clamp(2rem, 4.4vw, 3.6rem); line-height: 1.02; letter-spacing: -0.03em; text-wrap: balance;
+}
+.sec-head p { margin: 0; color: var(--ink-header); max-width: 56ch; }
+
+/* The loop: each step is a zone, named by a band like the app's tool bands */
+.steps { display: grid; gap: clamp(56px, 8vw, 112px); }
+.step { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: clamp(24px, 4vw, 56px); align-items: start; }
+.step:nth-child(even) { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); }
+.step:nth-child(even) figure { order: 2; }
+.step figure { margin: 0; background: var(--panel); border: 1px solid var(--seam); }
+.step figure video { display: block; width: 100%; height: auto; background: var(--canvas); }
+.step figcaption { padding: 10px 12px; border-top: 1px solid var(--seam); font-size: 13px; color: var(--ink-muted); }
+.step h3 {
+  margin: 4px 0 12px; font-family: var(--display); font-weight: 700; font-stretch: 108%;
+  font-size: clamp(1.5rem, 2.2vw, 2rem); line-height: 1.1; letter-spacing: -0.02em;
+}
+.step p { margin: 0 0 12px; color: var(--ink-header); }
+.step p strong { color: var(--ink); font-weight: 600; }
+.step .more { display: inline-flex; gap: 6px; align-items: center; color: var(--ivrea-line); font-weight: 600; text-decoration: none; margin-top: 8px; }
+.step .more:hover { text-decoration: underline; }
+.step .more svg { width: 16px; height: 16px; }
+
+/* Spec plate: measured numbers, set as a table, with the method */
+.spec { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.spec th, .spec td { text-align: left; padding: 18px 16px 18px 0; border-top: 1px solid var(--rule); vertical-align: baseline; }
+.spec tr:last-child th, .spec tr:last-child td { border-bottom: 1px solid var(--rule); }
+.spec thead th { font: 500 12px/1 var(--sans); color: var(--ink-muted); padding-block: 12px; border-top: 0; }
+.spec .what { font: 600 17px/1.35 var(--sans); color: var(--ink); width: 30%; }
+.spec .val { font: 700 clamp(1.6rem, 3vw, 2.4rem)/1 var(--display); font-stretch: 112%; letter-spacing: -0.02em; color: var(--ivrea-line); white-space: nowrap; width: 22%; }
+.spec .val small { font: 400 15px/1 var(--sans); color: var(--ink-header); letter-spacing: 0; margin-left: 4px; }
+.spec .how { color: var(--ink-muted); font-size: 15px; }
+.spec-note { margin: 16px 0 0; color: var(--ink-muted); font-size: 14px; max-width: 70ch; }
+.spec-note a { color: var(--ink-header); }
+
+/* What's in the box: a ruled index with a theme switch on the picture */
+.box { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(24px, 4vw, 72px); align-items: start; }
+.index { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.index li { display: grid; grid-template-columns: 9.5rem 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--rule); }
+.index b { font: 600 15px/1.5 var(--sans); color: var(--ink); }
+.index span { color: var(--ink-header); font-size: 15px; }
+.shots { position: sticky; top: 24px; }
+.switch { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; padding: 4px; margin-bottom: 14px; background: var(--panel); }
+.switch button {
+  font: 500 13px/1 var(--sans); color: var(--ink-muted); background: none; border: 0; border-radius: 4px;
+  height: 30px; padding: 0 14px; cursor: pointer;
+}
+.switch button[aria-pressed="true"] { background: var(--ivrea); color: var(--band-ink); }
+.frame { position: relative; aspect-ratio: 1360 / 860; }
+.frame img { position: absolute; inset: 0; width: 100%; height: 100%; transition: opacity 320ms var(--ease); filter: drop-shadow(0 18px 40px rgba(0,0,0,0.45)); }
+.frame img.light { opacity: 0; }
+.frame[data-theme="light"] img.light { opacity: 1; }
+.frame[data-theme="light"] img.dark { opacity: 0; }
+.shots figcaption { margin-top: 14px; font-size: 14px; color: var(--ink-muted); }
+.thumbs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+.thumbs a { display: block; border: 1px solid var(--seam); background: var(--panel); text-decoration: none; color: var(--ink-header); font-size: 13px; }
+.thumbs a:hover { border-color: var(--ivrea-line); }
+.thumbs .crop { display: block; overflow: hidden; aspect-ratio: 4 / 3; position: relative; }
+.thumbs .crop img { position: absolute; width: 230%; max-width: none; left: var(--x); top: var(--y); }
+.thumbs span { display: block; padding: 8px 10px; }
+
+/* Free, and staying free: the receipt */
+.support { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(32px, 6vw, 96px); align-items: center; }
+.support .note p { color: var(--ink-header); max-width: 54ch; }
+.support .note p.first { font-size: 20px; color: var(--ink); line-height: 1.5; margin-top: 24px; }
+.support .note .sig { margin-top: 24px; font: 600 16px/1.4 var(--sans); color: var(--ink); }
+.support .note .sig span { display: block; color: var(--ink-muted); font-weight: 400; font-size: 14px; }
+.receipt {
+  background: var(--paper); color: var(--paper-ink);
+  padding: 28px; font-family: var(--sans); font-size: 15px; line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.receipt h3 { margin: 0 0 2px; font: 700 22px/1.2 var(--display); font-stretch: 112%; letter-spacing: -0.01em; }
+.receipt .muted { color: var(--paper-muted); }
+.receipt .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.receipt .row span:last-child { font-family: var(--mono); font-size: 14px; }
+.receipt .row + .row { border-top: 1px solid var(--paper-rule); }
+.receipt hr { border: 0; border-top: 2px solid var(--paper-ink); margin: 12px 0 4px; }
+.receipt .total { font-weight: 700; font-size: 17px; }
+.receipt .tip { margin-top: 20px; }
+.receipt .tip p { margin: 0 0 12px; font-size: 14px; color: var(--paper-muted); }
+.receipt .btn-kofi { background: var(--ivrea); color: var(--band-ink); width: 100%; justify-content: center; }
+.receipt .btn-kofi:hover { background: var(--ivrea-hover); }
+.receipt .btn-kofi .cup { color: var(--band-ink); }
+
+/* Download */
+.downloads { width: 100%; border-collapse: collapse; }
+.downloads th, .downloads td { text-align: left; padding: 14px 16px 14px 0; border-top: 1px solid var(--rule); vertical-align: baseline; }
+.downloads tr:last-child th, .downloads tr:last-child td { border-bottom: 1px solid var(--rule); }
+.downloads th { font: 600 16px/1.4 var(--sans); color: var(--ink); width: 34%; }
+.downloads td { color: var(--ink-header); font-size: 15px; }
+.downloads code { color: var(--ink); overflow-wrap: anywhere; }
+.dl-cta { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; margin-top: 28px; }
+.dl-cta p { margin: 0; color: var(--ink-muted); font-size: 14px; max-width: 60ch; }
+.dl-cta a:not(.btn) { color: var(--ink-header); }
+
+/* Footer band */
+footer { margin-top: clamp(96px, 12vw, 160px); background: var(--ivrea); color: var(--band-ink); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; min-height: 72px; padding-block: 16px; font-size: 14px; }
+footer .wrap > span { margin-right: auto; color: var(--band-ink-muted); }
+footer a { color: var(--band-ink); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+/* ---------- Narrow screens ---------- */
+@media (max-width: 960px) {
+  .tag, .sec-head, .box, .support { grid-template-columns: 1fr; }
+  .step, .step:nth-child(even) { grid-template-columns: 1fr; }
+  .step:nth-child(even) figure { order: 0; }
+  .shots { position: static; }
+  .zero { font-size: calc((100vw - 2 * var(--gutter)) * 1.05); }
+  .tag { align-items: start; }
+  .window { margin-bottom: calc(var(--win) * -0.22); }
+  .after-hero { padding-top: calc((100vw - 2 * var(--gutter)) * 0.22 + 64px); }
+}
+@media (max-width: 640px) {
+  .band a.tool .label, .band .sep { display: none; }
+  .band a.tool { padding: 0 10px; }
+  .index li { grid-template-columns: 1fr; gap: 2px; }
+  .spec thead { display: none; }
+  .spec tr { display: grid; grid-template-columns: 1fr auto; border-top: 1px solid var(--rule); padding: 14px 0; }
+  .spec th, .spec td { border: 0 !important; padding: 0; }
+  .spec .what { width: auto; grid-column: 1; }
+  .spec .val { width: auto; grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .spec .how { grid-column: 1; margin-top: 4px; }
+  .spec tr:last-child { border-bottom: 1px solid var(--rule); }
+  .downloads tr { display: grid; border-top: 1px solid var(--rule); padding: 12px 0; }
+  .downloads th, .downloads td { border: 0 !important; padding: 0; width: auto; }
+  .downloads tr:last-child { border-bottom: 1px solid var(--rule); }
+  .thumbs { grid-template-columns: 1fr 1fr; }
+  .thumbs a:last-child { display: none; }
+  .actions .btn { flex: 1 1 100%; justify-content: center; }
+  .window-note { display: none; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hero">
+  <div class="wrap">
+    <nav class="band" aria-label="Main">
+      <a class="mark" href="./"><img src="app-icon.svg" alt="" width="28" height="28">Savoia Studio</a>
+      <a class="tool" href="docs/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg><span class="label">Docs</span></a>
+      <a class="tool" href="https://github.com/joaoGabriel55/savoia-studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg><span class="label">GitHub</span></a>
+      <span class="sep" aria-hidden="true"></span>
+      <a class="tool" href="https://ko-fi.com/O5I528IC3A"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/></svg><span class="label">Ko-fi</span></a>
+    </nav>
+
+    <div class="tag">
+      <div class="price">
+        <span class="zero" aria-hidden="true">0</span>
+        <p class="price-cap"><span><strong>What it costs.</strong> At home, at work, for the whole team.</span><span aria-hidden="true">forever</span></p>
+      </div>
+
+      <div class="offer">
+        <h1>The database client that costs nothing and asks for nothing.</h1>
+        <p class="lede">Savoia Studio is a desktop app for <strong>PostgreSQL</strong> and <strong>MySQL</strong>, written in Rust and drawn on the GPU. No webview, no JVM. It opens fast and stays out of your way.</p>
+
+        <ul class="ledger" aria-label="What you will not need">
+          <li><span class="item">Free trial</span><span class="none">none, it's simply free</span></li>
+          <li><span class="item">License key</span><span class="none">none</span></li>
+          <li><span class="item">Paid tier</span><span class="none">none, every feature is in</span></li>
+          <li><span class="item">Account or sign-in</span><span class="none">none</span></li>
+          <li><span class="item">Telemetry</span><span class="none">none</span></li>
+        </ul>
+
+        <div class="actions">
+          <a class="btn btn-download" id="download" href="https://github.com/joaoGabriel55/savoia-studio/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg><span id="download-label">Download</span></a>
+          <a class="btn btn-kofi" href="https://ko-fi.com/O5I528IC3A"><svg class="cup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/></svg>Support on Ko-fi</a>
+          <p class="alt">macOS, Windows and Linux. <a href="#download-all">All downloads</a> · Open source under MIT or Apache-2.0.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="window">
+      <span class="window-note">The real app, on the Serie A sample database.</span>
+      <img src="docs/media/app-dark.webp" width="2000" height="1265" alt="Savoia Studio's main window: the Database Explorer tree on the left, a SQL console with a standings query in the middle, and a result grid of 20 Serie A clubs below it.">
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="after-hero" aria-labelledby="loop">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="loop">Your daily loop, without the weight.</h2>
+        <p>Connect, query, fix a row, move on. These are screen recordings of the app at normal speed, on a local Postgres with the sample database from the repository.</p>
+      </div>
+
+      <div class="steps">
+        <article class="step">
+          <figure>
+            <video poster="docs/media/connect-url.webp" width="1200" height="1078" autoplay muted loop playsinline preload="metadata" aria-label="Recording: a postgres:// URL is pasted into the New data source form, Import fills host, port, user and database, a color tag is picked, and Test reports Connected to PostgreSQL 17.">
+<source src="docs/media/connect-url.mp4" type="video/mp4">
+</video>
+            <figcaption>New data source: paste, <strong>Import</strong>, <strong>Test</strong>.</figcaption>
+          </figure>
+          <div>
+            <h3>Connect in one paste.</h3>
+            <p>Paste a <code>postgres://</code> or <code>mysql://</code> URL and <strong>Import</strong> fills the form. <strong>Test</strong> tells you it works before you save.</p>
+            <p>Give production a red tag and it shows on every tab and in the status bar, so you always know where you are typing. SSH tunnels, TLS modes and read-only sessions are on the same form.</p>
+            <a class="more" href="docs/connect.html">Connecting, in detail <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>
+          </div>
+        </article>
+
+        <article class="step">
+          <figure>
+            <video poster="docs/media/console-completion.webp" width="1200" height="542" autoplay muted loop playsinline preload="metadata" aria-label="Recording: a query is typed in the console; after JOIN, completion offers serie_a.clubs c ON c.id = p.club_id from the foreign key; the query runs and returns 249 rows.">
+<source src="docs/media/console-completion-m.mp4" type="video/mp4" media="(max-width: 640px)">
+<source src="docs/media/console-completion.mp4" type="video/mp4">
+</video>
+            <figcaption>The console: completion after <code>JOIN</code>, then <kbd>⌘</kbd><kbd>↩</kbd>.</figcaption>
+          </figure>
+          <div>
+            <h3>Completion that reads your foreign keys.</h3>
+            <p>Type <code>JOIN</code> and Savoia offers the whole clause, <code>clubs c ON c.id = p.club_id</code>, straight from the schema. Tables and columns complete as you type.</p>
+            <p><kbd>⌘</kbd> <kbd>↩</kbd> runs the statement under the caret. Big results stream in, and you can cancel at any time.</p>
+            <a class="more" href="docs/console.html">Writing and running SQL <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>
+          </div>
+        </article>
+
+        <article class="step">
+          <figure>
+            <video poster="docs/media/edit-review.webp" width="1200" height="486" autoplay muted loop playsinline preload="metadata" aria-label="Recording: two cells in the players table are edited, both rows are marked as pending, and Review SQL opens a dialog with BEGIN, two UPDATE statements and COMMIT before anything runs.">
+<source src="docs/media/edit-review-m.mp4" type="video/mp4" media="(max-width: 640px)">
+<source src="docs/media/edit-review.mp4" type="video/mp4">
+</video>
+            <figcaption>The data view: two edits, then <strong>Review SQL</strong>.</figcaption>
+          </figure>
+          <div>
+            <h3>Edit rows. See the SQL first.</h3>
+            <p>Double-click a cell to change it. Nothing is sent yet: edits wait as pending changes, and <strong>Review SQL</strong> shows the exact statements.</p>
+            <p><strong>Commit</strong> runs them in one transaction. If anything fails, it all rolls back and your changes stay pending.</p>
+            <a class="more" href="docs/data-view.html">Browsing and editing data <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="measured">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="measured">Measured, not promised.</h2>
+        <p>Native code is the point of Savoia. These are our own measurements of a release build, with the scripts in the repository so you can run them yourself.</p>
+      </div>
+      <table class="spec">
+        <thead><tr><th scope="col">Measure</th><th scope="col">Result</th><th scope="col">How</th></tr></thead>
+        <tbody>
+          <tr><th scope="row" class="what">Start to first drawn frame</th><td class="val">205<small>ms</small></td><td class="how">Median of 17 launches, with saved connections, theme and a console loaded. The first launch of a new build takes about 1.1 s while macOS scans it.</td></tr>
+          <tr><th scope="row" class="what">Memory, idle</th><td class="val">69<small>MB</small></td><td class="how">Physical footprint, as Activity Monitor shows it, 10 s after launch with the window open.</td></tr>
+          <tr><th scope="row" class="what">Frames over 16.7 ms, scrolling 1,000,000 rows</th><td class="val">0</td><td class="how">1,200 timed frames of steady scrolling, flings and random jumps. Every frame landed at about 8.3 ms on a 120 Hz display (3 of 5 runs).</td></tr>
+        </tbody>
+      </table>
+      <p class="spec-note">macOS 27 on an Apple M3 Pro. Windows and Linux are not measured yet. Methods and every run, good and bad: <a href="https://github.com/joaoGabriel55/savoia-studio/tree/main/docs/benchmarks">docs/benchmarks</a>.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="box">
+    <div class="wrap box">
+      <div>
+        <h2 id="box">Everything is in the free version, because there is only one.</h2>
+        <ul class="index" style="margin-top: 40px">
+          <li><b>Explore</b><span>A schema tree that loads as you open it, with counts, ER diagrams, table structure and DDL.</span></li>
+          <li><b>Query</b><span>Console tabs, schema-aware completion, multiple result sets, sort, filter, copy as CSV, JSON or <code>INSERT</code>, and a searchable history.</span></li>
+          <li><b>Data view</b><span>Browse and filter tables without SQL, add columns through foreign keys, summarize, and edit with a SQL preview.</span></li>
+          <li><b>Dump and import</b><span>Uses your <code>pg_dump</code>, <code>psql</code>, <code>mysqldump</code> or <code>mysql</code>, or a built-in engine. SQL scripts and CSV.</span></li>
+          <li><b>Connections</b><span>TLS modes, SSH tunnels with known_hosts checks, read-only sessions and color tags.</span></li>
+          <li><b>Keyboard</b><span>A command palette (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd>) with every command and its shortcut. Light and dark themes that can follow your OS.</span></li>
+        </ul>
+      </div>
+      <figure class="shots" style="margin: 0">
+        <div class="switch" role="group" aria-label="Theme of the screenshot">
+          <button type="button" data-set="dark" aria-pressed="true">Dark</button>
+          <button type="button" data-set="light" aria-pressed="false">Light</button>
+        </div>
+        <div class="frame" id="frame" data-theme="dark">
+          <img class="dark" src="docs/media/app-dark.webp" width="2000" height="1265" loading="lazy" alt="Savoia Studio in the dark theme.">
+          <img class="light" src="docs/media/app-light.webp" width="2000" height="1265" loading="lazy" alt="Savoia Studio in the light theme.">
+        </div>
+        <figcaption>Graphite or Olivetti paper. <em>Match system</em> follows your OS as it switches.</figcaption>
+        <div class="thumbs">
+          <a href="docs/keyboard.html"><span class="crop" style="--x:-62%;--y:-6%"><img src="docs/media/command-palette.webp" width="2000" height="1265" loading="lazy" alt="The command palette listing commands with their shortcuts."></span><span>Command palette</span></a>
+          <a href="docs/transfer.html"><span class="crop" style="--x:-50%;--y:-8%"><img src="docs/media/dump-options.webp" width="2000" height="1265" loading="lazy" alt="The export wizard's options step, with pg_dump found on the system."></span><span>Dump wizard</span></a>
+          <a href="docs/data-view.html"><span class="crop" style="--x:-52%;--y:-6%"><img src="docs/media/data-view.webp" width="2000" height="1265" loading="lazy" alt="The data view of the players table."></span><span>Data view</span></a>
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="free">
+    <div class="wrap support">
+      <div class="note">
+        <h2 id="free">Free, and it stays free.</h2>
+        <p class="first">No trial that runs out, no feature held back for a paid tier, no license server to call home. Savoia Studio is open source under MIT or Apache-2.0, free for personal and commercial use.</p>
+        <p>It is built and maintained by one person in the open. If it saves you time, the kindest thing you can do is tell a colleague about it. If you would like to do a little more, you can buy me a coffee on Ko-fi. It goes straight back into the project.</p>
+        <p class="sig">Gabriel Quaresma<span>Maker of Savoia Studio</span></p>
+      </div>
+      <aside class="receipt" aria-label="What Savoia Studio costs">
+        <h3>Savoia Studio</h3>
+        <div class="muted">For PostgreSQL and MySQL</div>
+        <hr>
+        <div class="row"><span>Desktop app, every feature</span><span>0.00</span></div>
+        <div class="row"><span>Updates</span><span>0.00</span></div>
+        <div class="row"><span>Seats, any number</span><span>0.00</span></div>
+        <div class="row"><span>License key</span><span>none</span></div>
+        <hr>
+        <div class="row total"><span>Total</span><span>0.00</span></div>
+        <div class="tip">
+          <p>Tip, entirely optional.</p>
+          <a class="btn btn-kofi" href="https://ko-fi.com/O5I528IC3A"><svg class="cup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/></svg>Buy me a coffee on Ko-fi</a>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="download-all" aria-labelledby="get">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="get">Download it.</h2>
+        <p>Pick the file for your system from the latest release. Savoia checks for updates when it starts and asks before installing anything.</p>
+      </div>
+      <table class="downloads">
+        <tbody>
+          <tr><th scope="row">macOS, Apple silicon</th><td><code>savoia-studio_&lt;version&gt;_aarch64.dmg</code></td></tr>
+          <tr><th scope="row">macOS, Intel</th><td><code>savoia-studio_&lt;version&gt;_x64.dmg</code></td></tr>
+          <tr><th scope="row">Windows</th><td><code>…_x64-setup.exe</code> or <code>…_x64_en-US.msi</code></td></tr>
+          <tr><th scope="row">Debian, Ubuntu</th><td><code>savoia-studio_&lt;version&gt;_amd64.deb</code></td></tr>
+          <tr><th scope="row">Fedora, openSUSE</th><td><code>savoia-studio-&lt;version&gt;-1.x86_64.rpm</code></td></tr>
+          <tr><th scope="row">Any Linux</th><td><code>savoia-studio_&lt;version&gt;_x86_64.AppImage</code></td></tr>
+        </tbody>
+      </table>
+      <div class="dl-cta">
+        <a class="btn btn-download" href="https://github.com/joaoGabriel55/savoia-studio/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>Latest release</a>
+        <p>The installers are not code-signed yet, so macOS and Windows warn on first launch. <a href="docs/install.html#first-launch-warnings">How to open it anyway</a>.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Savoia Studio · free and open source</span>
+    <a href="docs/">Documentation</a>
+    <a href="docs/privacy.html">Privacy</a>
+    <a href="https://github.com/joaoGabriel55/savoia-studio">GitHub</a>
+    <a href="https://ko-fi.com/O5I528IC3A">Ko-fi</a>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var ua = navigator.userAgent || "";
+  var p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  var os = /Mac/i.test(p) || /Macintosh/.test(ua) ? "macOS"
+         : /Win/i.test(p) || /Windows/.test(ua) ? "Windows"
+         : /Linux|X11/i.test(p + ua) && !/Android/i.test(ua) ? "Linux" : "";
+  if (os) document.getElementById("download-label").textContent = "Download for " + os;
+
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.querySelectorAll("video[autoplay]").forEach(function (v) {
+      v.removeAttribute("autoplay"); v.pause(); v.controls = true;
+    });
+  }
+
+  var frame = document.getElementById("frame");
+  document.querySelectorAll(".switch button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      frame.dataset.theme = b.dataset.set;
+      document.querySelectorAll(".switch button").forEach(function (o) {
+        o.setAttribute("aria-pressed", String(o === b));
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

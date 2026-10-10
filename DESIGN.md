@@ -37,6 +37,13 @@ colors:
   tag-blue: "#5B8DEF"
   tag-purple: "#9B6BEF"
   tag-pink: "#EF6BC4"
+  web-paper: "#F7F6F2"
+  web-paper-panel: "#EEEDE7"
+  web-paper-seam: "#D6D4CB"
+  web-paper-rule: "#E0DED6"
+  web-paper-ink: "#1C201D"
+  web-paper-muted: "#646B66"
+  web-paper-line: "#1B7650"
 typography:
   title:
     fontFamily: "system-ui"
@@ -62,10 +69,94 @@ typography:
     fontFamily: "monospace"
     fontSize: "13px"
     fontWeight: 400
+  web-price:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "clamp(11rem, min(40vw, 62vh), 36rem)"
+    fontWeight: 800
+    lineHeight: 0.74
+    letterSpacing: "-0.04em"
+    fontVariation: "'wdth' 125"
+  web-display:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "clamp(2rem, 3.6vw, 3.4rem)"
+    fontWeight: 700
+    lineHeight: 1.04
+    letterSpacing: "-0.025em"
+    fontVariation: "'wdth' 108"
+  web-headline:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "clamp(2rem, 4.4vw, 3.6rem)"
+    fontWeight: 700
+    lineHeight: 1.02
+    letterSpacing: "-0.03em"
+    fontVariation: "'wdth' 112"
+  web-title:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "clamp(1.5rem, 2.2vw, 2rem)"
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: "-0.02em"
+    fontVariation: "'wdth' 108"
+  web-figure:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "clamp(1.6rem, 3vw, 2.4rem)"
+    fontWeight: 700
+    lineHeight: 1
+    letterSpacing: "-0.02em"
+    fontVariation: "'wdth' 112"
+  web-wordmark:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "17px"
+    fontWeight: 700
+    lineHeight: 1
+    letterSpacing: "-0.01em"
+    fontVariation: "'wdth' 112"
+  web-docs-h1:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "clamp(32px, 5vw, 46px)"
+    fontWeight: 700
+    lineHeight: 1.12
+    letterSpacing: "-0.03em"
+    fontVariation: "'wdth' 112"
+  web-docs-h2:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "26px"
+    fontWeight: 700
+    lineHeight: 1.12
+    letterSpacing: "-0.02em"
+    fontVariation: "'wdth' 108"
+  web-docs-h3:
+    fontFamily: "Archivo, system-ui, sans-serif"
+    fontSize: "20px"
+    fontWeight: 650
+    lineHeight: 1.12
+    letterSpacing: "-0.02em"
+    fontVariation: "'wdth' 104"
+  web-body:
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, sans-serif"
+    fontSize: "17px"
+    fontWeight: 400
+    lineHeight: 1.6
+  web-docs-body:
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, sans-serif"
+    fontSize: "17px"
+    fontWeight: 400
+    lineHeight: 1.65
+  web-button:
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, sans-serif"
+    fontSize: "16px"
+    fontWeight: 600
+    lineHeight: 1
+  web-mono:
+    fontFamily: "ui-monospace, SF Mono, Menlo, Consolas, Liberation Mono, monospace"
+    fontSize: "0.88em"
+    fontWeight: 400
 rounded:
   mark: "4px"
   control: "6px"
   dialog: "8px"
+  web-callout: "8px"
+  web-capture: "10px"
   dot: "9999px"
 spacing:
   "2": "2px"
@@ -74,6 +165,9 @@ spacing:
   "8": "8px"
   "12": "12px"
   "16": "16px"
+  web-gutter: "clamp(16px, 4vw, 56px)"
+  web-section: "clamp(80px, 12vw, 160px)"
+  web-max: "1240px"
 components:
   button-primary:
     backgroundColor: "{colors.ivrea-green}"
@@ -126,6 +220,54 @@ components:
   status-dot:
     rounded: "{rounded.dot}"
     size: "6px"
+  web-button-download:
+    backgroundColor: "{colors.savoy-blue}"
+    textColor: "{colors.savoy-ink}"
+    typography: "{typography.web-button}"
+    rounded: "{rounded.control}"
+    height: "48px"
+    padding: "0 20px"
+  web-button-download-hover:
+    backgroundColor: "{colors.savoy-blue-hover}"
+  web-button-download-active:
+    backgroundColor: "{colors.savoy-blue-pressed}"
+  web-button-kofi:
+    backgroundColor: "{colors.band-ink}"
+    textColor: "{colors.web-paper-ink}"
+    typography: "{typography.web-button}"
+    rounded: "{rounded.control}"
+    height: "48px"
+    padding: "0 20px"
+  web-button-kofi-on-paper:
+    backgroundColor: "{colors.ivrea-green}"
+    textColor: "{colors.band-ink}"
+    typography: "{typography.web-button}"
+    rounded: "{rounded.control}"
+    height: "48px"
+  web-button-kofi-on-paper-hover:
+    backgroundColor: "{colors.ivrea-green-hover}"
+  web-band-nav:
+    backgroundColor: "{colors.ivrea-green}"
+    textColor: "{colors.band-ink}"
+    height: "56px"
+  web-docs-menu-band:
+    backgroundColor: "{colors.ivrea-green}"
+    textColor: "{colors.band-ink}"
+    height: "52px"
+  web-paper-plate:
+    backgroundColor: "{colors.web-paper}"
+    textColor: "{colors.web-paper-ink}"
+    padding: "28px"
+  web-docs-callout:
+    rounded: "{rounded.web-callout}"
+    padding: "12px 18px"
+  web-docs-capture:
+    backgroundColor: "{colors.web-paper-panel}"
+    rounded: "{rounded.web-capture}"
+  web-footer-band:
+    backgroundColor: "{colors.ivrea-green}"
+    textColor: "{colors.band-ink}"
+    height: "72px"
 ---
 
 # Design System: Savoia Studio
@@ -298,3 +440,86 @@ Flat and quiet. Color does the work; there is no gloss.
 - **Don't** use deep Ivrea green as a 1px stroke on graphite.
 - **Don't** put toolkit-default disabled ink on a green band.
 - **Don't** drift toward DBeaver/Eclipse clutter, Electron SaaS gloss, or neon terminal cosplay.
+
+---
+
+## Web surfaces (site and docs)
+
+The public site extends the same world to the web: the landing page (`docs/site/landing/index.html`, tokens inline on `:root`) and the mdBook docs (`docs/site/theme/savoia.css`, `savoia.js`). Everything above still holds for the app. This section adds what the web needs and names the one place it departs from the window. The `web-` tokens in the frontmatter belong to these surfaces only; the app never reads them.
+
+### Overview
+The landing opens on a drenched Ivrea field: a full-width green first viewport in band ink, the band nav across its top, a giant Archivo "0" as the price tag, and the real app window rising out of the field's bottom edge and cropped by it. Below it, every section sits on graphite canvas, ruled with hairlines rather than boxed. A footer band in Ivrea green closes the page. The docs keep a calm reading column on Olivetti paper or graphite, under an Ivrea menu band.
+
+### Colors
+The web uses the app's tokens for green, band ink, graphite and Savoy blue, and adds the light appearance's paper values as `web-paper` tokens (paper, panel, seam, rule, ink, muted, line). They match the app's light palette table.
+
+- **Drenched Ivrea:** the hero and the footer are solid `ivrea-green` with `band-ink` text, `band-ink-muted` secondary text and `band-rule` hairlines, just like a tool band.
+- **Graphite sections:** `graphite-canvas` ground. Body text in `ink-header`, emphasis in `ink`, captions in `ink-muted`, rules in `graphite-rule`, figure frames in `graphite-seam`. Text links and measured numbers take `ivrea-line`.
+- **Paper plate:** a square `web-paper` panel set into a graphite section (the "receipt" support panel), with `web-paper-ink`, `web-paper-muted` and `web-paper-seam` row rules.
+- **Docs mapping:** mdBook *light* is Olivetti paper (`web-paper` canvas, `web-paper-panel` sidebar, code and quotes, `web-paper-line` links and active item), and *coal* (relabelled "Dark") is graphite (`graphite-canvas`, `graphite-panel`, `ivrea-line` links). The rust, navy and ayu themes are hidden from the picker, and their classes fall back to the two looks. Warning borders take saffron in both.
+
+**The Download-Only Blue Rule.** This is the web's exception to the Run-Only Blue Rule: on the site, Savoy blue fills the Download action and nothing else. It shows up twice on the landing, as the hero's OS-detected "Download for …" and as "Latest release". The docs carry no blue at all. Ko-fi is never blue: it takes a band-ink fill on green and an Ivrea fill on paper.
+
+### Typography
+**Display Font:** Archivo variable (self-hosted `archivo-wdth-wght.woff2`, weights 100 to 900, width 62 to 125%), falling back to system-ui.
+**Body Font:** the system sans stack (system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue).
+**Mono Font:** ui-monospace, SF Mono, Menlo, Consolas, Liberation Mono.
+
+Archivo is always set wide: 125% for the price numeral, 112% for section heads, the wordmark and measured numbers, 104 to 108% for titles and the hero H1. Weights are 800 (the numeral), 700 (headings) and 650 (docs h3).
+
+- **Price** (`web-price`): the single giant "0" in the hero. On narrow screens it scales with the column (about 1.05 times its width). The docs intro repeats it small (800, 64px) inside its free callout.
+- **Display** (`web-display`): the landing H1, balanced, 18ch at most.
+- **Headline** (`web-headline`): landing section heads.
+- **Title** (`web-title`): landing step titles. The paper plate title uses 700, 22px at 112%.
+- **Figure** (`web-figure`): measured values in the spec table, in Ivrea Line, with the unit in sans.
+- **Docs headings** (`web-docs-h1/h2/h3`): h2 opens with a hairline rule above it.
+- **Body** (`web-body`, `web-docs-body`): 17px reading text. Ledes go to 18px on the landing and 1.15 to 1.2em in the docs, with lines held to 46 to 70ch.
+- **Mono** (`web-mono`): only for code, commands, file names, keycaps and the plate's amounts. Keycaps get a 1px rule with a 2px bottom edge and a 4px radius.
+
+**The Wide Archivo Rule.** On the web, every display line is Archivo set wide. Reading text is the system sans, and mono marks only code, keys and amounts. Never set body copy in Archivo or headings in the system font.
+
+### Layout
+The landing runs on a centered column (`web-max`, with `web-gutter` on each side) and a 5:7 grid for the hero and section heads. The loop steps alternate 8:4 and 4:8. Sections are spaced `web-section` apart. The first section after the hero adds the height of the cropped app window, which hangs 30% of its width below the field. Below 960px every grid falls to one column. Below 640px the band keeps only its icons, and the tables restack as ruled grids.
+
+The docs use an mdBook frame: a 52px menu band, a 280px sidebar that opens on an Ivrea "home" strip the same height as the band and closes with the Ko-fi support card, and a 760px reading column. Wide captures bleed 60px into the margins on each side from 1280px.
+
+### Elevation & Depth
+Web sections are flat, and the hero, sections, paper plate and bands cast no shadow. Only captures of the app lift, as if the window sat on the page.
+
+- **Hero window** (`filter: drop-shadow(0 30px 60px rgba(8, 20, 14, 0.55)) drop-shadow(0 4px 12px rgba(8, 20, 14, 0.35))`): the app window rising from the green field, tinted toward the green.
+- **Theme frame** (`filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.45))`): the landing's dark and light screenshot switch on graphite.
+- **Docs capture, paper** (`box-shadow: 0 12px 32px rgba(17, 20, 18, 0.16), 0 1px 3px rgba(17, 20, 18, 0.12)`).
+- **Docs capture, graphite** (`box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4)`).
+
+The landing's loop recordings sit in flat, square panel frames, with no shadow.
+
+**The Only-Captures-Lift Rule.** This is the web form of Docked-Is-Flat. A shadow on the site means "this is the real app". Text, plates, cards and controls stay flat.
+
+### Shapes
+Bands, sections, the paper plate and the landing's recording frames are square, so the Square Bars Rule carries over. Controls round to 6px (`rounded.control`): buttons, band tools, the theme switch, the search field, sidebar items. Docs callouts and containers round to 8px (`web-callout`): code blocks, blockquotes, the free callout, the sidebar support card, chapter navigation. Docs captures round to 10px (`web-capture`). Keycaps, inline code and switch segments use 4px (`rounded.mark`).
+
+### Components
+- **Band nav:** a 56px green band (`web-band-nav`) with a bottom `band-rule` hairline. The wordmark is the 28px app icon (6px radius, `band-rule` ring) plus Archivo 700 at 112%. Tools are 36px, 6px-radius links in 15px medium sans with 18px line icons, and hover to `ivrea-green-hover`. A 1 by 16px `band-rule` separator sets Ko-fi apart.
+- **Buttons:** 48px tall, 0 20px padding, 6px radius, 600 16px sans with a 20px icon. Each one moves 1px down when pressed. Download is Savoy blue (hover and press steps as in the app). Ko-fi on green is band ink with paper ink, hovers to white, and its cup icon is Ivrea. Ko-fi on paper is Ivrea with band ink. The ghost variant on green is an inset `band-rule` ring.
+- **Struck ledger:** a list ruled in `band-rule` that names what you don't need, items in Archivo 600 17px on the left and a muted sans "none" on the right. A 2px band-ink strike draws across each item once on load, staggered by 140ms, and the items then settle to muted ink. With reduced motion the items are simply muted.
+- **Recordings with captions:** the screen recordings are muted, looping, inline `<video>`s with a poster frame and a descriptive `aria-label`. They autoplay, and with reduced motion they stop and show controls. Narrow screens get a smaller cut through `media`. On the landing they sit in a square `graphite-panel` frame with a `graphite-seam` border and a 13px muted caption below a seam rule. In the docs they share the `figure.shot` frame with stills: 10px radius, seam border, capture shadow, and a 0.85em muted caption. Stills come in theme-matched pairs (only-light, only-dark).
+- **Spec table:** a table ruled in `graphite-rule` with the measure in 600 sans, the value in `web-figure` Ivrea Line, and the method in muted 15px. A note under it gives the machine and links the benchmarks.
+- **Ruled index:** feature rows with a 9.5rem bold term column and hairlines between rows.
+- **Paper plate:** a square receipt in `web-paper`, padded 28px, with a 2px paper-ink rule above the total. Amounts are in mono with tabular figures. The full-width Ko-fi on paper closes it.
+- **Docs menu band:** `#menu-bar` in Ivrea green with no bottom border, icons in `band-ink-muted` (band ink on hover, over `ivrea-green-hover`), the title in Archivo 700 at 112%, and a band-ink Ko-fi chip (32px, 6px radius).
+- **Docs sidebar:** items 7 by 10px, 6px radius. The active item is `selection` (green-tinted) in 600 weight. The support card is an 8px-radius `seam`-bordered card on the page ground, with an Archivo title and a full-width Ivrea Ko-fi button.
+- **Docs tables:** ruled, without zebra stripes. The header is 600 muted sans over a seam rule, and rows sit on hairlines.
+- **Free callout (docs intro):** an 8px-radius Ivrea field with the small "0" price numeral and band-ink text.
+
+### Do's and Don'ts
+#### Do:
+- **Do** open a web page on a drenched Ivrea field or band, and set the rest on graphite (or paper in the docs) ruled with hairlines.
+- **Do** keep Savoy blue to the Download action alone on the site.
+- **Do** set display lines in wide Archivo, reading text in the system sans, and mono only for code, keys and amounts.
+- **Do** show the product with real captures and recordings, each with a caption, and let only those captures cast a shadow.
+- **Do** map docs light to Olivetti paper and docs dark to graphite, with links in the appearance's line green.
+
+#### Don't:
+- **Don't** fill Ko-fi, links or any second control with Savoy blue, and don't add blue to the docs.
+- **Don't** shadow text, plates, cards or bands, and don't round bands or sections.
+- **Don't** offer mdBook's rust, navy or ayu looks.
