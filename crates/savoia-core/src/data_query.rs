@@ -210,6 +210,33 @@ pub struct TableQuery {
     /// The row's key (primary or unique), for a stable order between
     /// pages. Empty when the table has none.
     pub key: Vec<String>,
+    /// When set, the view shows groups instead of rows.
+    pub summary: Option<Summary>,
+}
+
+/// Rows grouped by some columns, with aggregates per group. Outputs are
+/// the group columns, then the aggregates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub by: Vec<Source>,
+    /// `None` aggregates whole rows (`count(*)`).
+    pub aggregates: Vec<(Agg, Option<Source>)>,
+    /// Output position (0-based) and whether it sorts descending.
+    pub sort: Option<(usize, bool)>,
+}
+
+impl Summary {
+    /// The output headers: group columns, then `count`, `sum(total)`, ….
+    pub fn labels(&self) -> Vec<String> {
+        self.by
+            .iter()
+            .map(Source::label)
+            .chain(self.aggregates.iter().map(|(agg, source)| match source {
+                Some(source) => format!("{}({})", agg.label(), source.label()),
+                None => agg.label().to_owned(),
+            }))
+            .collect()
+    }
 }
 
 /// The alias of each joined path prefix: `t1`, `t2`, … in first-use order.
@@ -232,12 +259,38 @@ impl TableQuery {
         quote_ident(self.engine, ident)
     }
 
-    /// Every source the statement uses: columns, filters, sort.
-    fn sources(&self) -> impl Iterator<Item = &Source> {
-        self.columns
-            .iter()
-            .chain(self.filters.iter().map(|f| &f.column))
-            .chain(self.sort.iter().map(|(s, _)| s))
+    /// Every source the statement uses: columns (or the summary's),
+    /// filters, sort.
+    fn sources(&self) -> Box<dyn Iterator<Item = &Source> + '_> {
+        let filters = self.filters.iter().map(|f| &f.column);
+        match &self.summary {
+            Some(summary) => Box::new(
+                summary
+                    .by
+                    .iter()
+                    .chain(summary.aggregates.iter().filter_map(|(_, s)| s.as_ref()))
+                    .chain(filters),
+            ),
+            None => Box::new(
+                self.columns
+                    .iter()
+                    .chain(filters)
+                    .chain(self.sort.iter().map(|(s, _)| s)),
+            ),
+        }
+    }
+
+    /// `agg` over `value`: count, sum, …, or the engine's string list.
+    fn aggregate(&self, agg: Agg, value: &str) -> String {
+        match (agg, self.engine) {
+            (Agg::Count, _) if value.is_empty() => "count(*)".to_string(),
+            (Agg::Count, _) => format!("count({value})"),
+            (Agg::List, Engine::Postgres) => {
+                format!("string_agg(DISTINCT CAST({value} AS text), ', ')")
+            }
+            (Agg::List, Engine::Mysql) => format!("GROUP_CONCAT(DISTINCT {value} SEPARATOR ', ')"),
+            (agg, _) => format!("{}({value})", agg.label()),
+        }
     }
 
     fn joins(&self) -> Joins {
@@ -290,15 +343,9 @@ impl TableQuery {
                     .as_deref()
                     .map(|c| format!("c.{}", self.q(c)))
                     .unwrap_or_default();
-                let aggregate = match (agg, self.engine) {
-                    (Agg::Count, _) => "count(*)".to_string(),
-                    (Agg::List, Engine::Postgres) => {
-                        format!("string_agg(DISTINCT CAST({value} AS text), ', ')")
-                    }
-                    (Agg::List, Engine::Mysql) => {
-                        format!("GROUP_CONCAT(DISTINCT {value} SEPARATOR ', ')")
-                    }
-                    (agg, _) => format!("{}({value})", agg.label()),
+                let aggregate = match agg {
+                    Agg::Count => "count(*)".to_string(),
+                    agg => self.aggregate(*agg, &value),
                 };
                 format!(
                     "(SELECT {aggregate} FROM {} AS c WHERE {})",
@@ -395,6 +442,9 @@ impl TableQuery {
     /// other tables are named by their labels.
     pub fn sql(&self) -> String {
         let joins = self.joins();
+        if let Some(summary) = &self.summary {
+            return self.summary_sql(summary, &joins);
+        }
         let columns: Vec<String> = self
             .columns
             .iter()
@@ -413,6 +463,54 @@ impl TableQuery {
             self.from(&joins),
             self.where_clause(&joins),
             self.order_clause(&joins)
+        )
+    }
+
+    fn summary_sql(&self, summary: &Summary, joins: &Joins) -> String {
+        let by: Vec<String> = summary.by.iter().map(|s| self.expr(s, joins)).collect();
+        let labels = summary.labels();
+        let outputs: Vec<String> = by
+            .iter()
+            .cloned()
+            .chain(summary.aggregates.iter().map(|(agg, source)| {
+                let value = source
+                    .as_ref()
+                    .map(|s| self.expr(s, joins))
+                    .unwrap_or_default();
+                self.aggregate(*agg, &value)
+            }))
+            .zip(&labels)
+            .map(|(expr, label)| format!("{expr} AS {}", self.q(label)))
+            .collect();
+        let group = if by.is_empty() {
+            String::new()
+        } else {
+            format!(" GROUP BY {}", by.join(", "))
+        };
+        // By position: the chosen output, then the groups for a stable order.
+        let mut order: Vec<String> = Vec::new();
+        if let Some((ix, descending)) = summary.sort {
+            order.push(format!(
+                "{}{}",
+                ix + 1,
+                if descending { " DESC" } else { "" }
+            ));
+        }
+        for ix in 0..by.len() {
+            if summary.sort.is_none_or(|(sorted, _)| sorted != ix) {
+                order.push((ix + 1).to_string());
+            }
+        }
+        let order = if order.is_empty() {
+            String::new()
+        } else {
+            format!(" ORDER BY {}", order.join(", "))
+        };
+        format!(
+            "SELECT {} FROM {}{}{group}{order}",
+            outputs.join(", "),
+            self.from(joins),
+            self.where_clause(joins),
         )
     }
 
@@ -436,6 +534,7 @@ mod tests {
             filters: Vec::new(),
             sort: None,
             key: vec!["id".into()],
+            summary: None,
         }
     }
 
@@ -602,5 +701,48 @@ mod tests {
     fn hop_labels() {
         assert_eq!(customer().label(), "customer");
         assert_eq!(country().label(), "countries");
+    }
+
+    #[test]
+    fn summaries_group_and_aggregate() {
+        let mut q = query(Engine::Postgres);
+        q.filters = vec![Filter {
+            column: Source::Base("note".into()),
+            op: Op::IsNotNull,
+            value: String::new(),
+        }];
+        q.summary = Some(Summary {
+            by: vec![Source::Lookup {
+                path: vec![customer()],
+                column: "name".into(),
+            }],
+            aggregates: vec![
+                (Agg::Count, None),
+                (Agg::Sum, Some(Source::Base("total".into()))),
+            ],
+            sort: Some((1, true)),
+        });
+        assert_eq!(
+            q.summary.as_ref().unwrap().labels(),
+            ["customer › name", "count", "sum(total)"]
+        );
+        assert_eq!(
+            q.sql(),
+            "SELECT t1.\"name\" AS \"customer › name\", count(*) AS \"count\", \
+             sum(t0.\"total\") AS \"sum(total)\" FROM \"shop\".\"orders\" AS t0 \
+             LEFT JOIN \"shop\".\"customers\" AS t1 ON t1.\"id\" = t0.\"customer_id\" \
+             WHERE t0.\"note\" IS NOT NULL GROUP BY t1.\"name\" ORDER BY 2 DESC, 1"
+        );
+        q.summary = Some(Summary {
+            by: Vec::new(),
+            aggregates: vec![(Agg::List, Some(Source::Base("note".into())))],
+            sort: None,
+        });
+        q.engine = Engine::Mysql;
+        assert_eq!(
+            q.sql(),
+            "SELECT GROUP_CONCAT(DISTINCT t0.`note` SEPARATOR ', ') AS `list(note)` \
+             FROM `shop`.`orders` AS t0 WHERE t0.`note` IS NOT NULL"
+        );
     }
 }

@@ -14,7 +14,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use savoia_core::data_query::{Hop, Source};
+use savoia_core::data_query::{Agg, Hop, Source, Summary};
 use savoia_core::sql_text::{quote_ident, quote_literal};
 use savoia_core::{Engine, TableInfo};
 
@@ -508,6 +508,159 @@ impl Render for JoinDialog {
                             if let Some(hop) = add.clone() {
                                 window.close_dialog(cx);
                                 on_add(hop, window, cx);
+                            }
+                        }),
+                ),
+            )
+    }
+}
+
+type OnSummary = Rc<dyn Fn(Summary, &mut Window, &mut App)>;
+
+/// "Summarize": group the view's rows by some of its columns, with
+/// aggregates per group.
+pub struct SummarizeDialog {
+    /// The view's columns that can group or be aggregated, and whether
+    /// each is numeric.
+    columns: Vec<(Source, bool)>,
+    by: Vec<usize>,
+    aggregates: Vec<(Agg, Option<usize>)>,
+    on_apply: OnSummary,
+}
+
+impl SummarizeDialog {
+    pub fn new(columns: Vec<(Source, bool)>, on_apply: OnSummary) -> Self {
+        Self {
+            columns,
+            by: Vec::new(),
+            aggregates: vec![(Agg::Count, None)],
+            on_apply,
+        }
+    }
+
+    pub fn toggle_by(&mut self, ix: usize, cx: &mut Context<Self>) {
+        match self.by.iter().position(|&b| b == ix) {
+            Some(at) => {
+                self.by.remove(at);
+            }
+            None => self.by.push(ix),
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_aggregate(&mut self, agg: Agg, column: Option<usize>, cx: &mut Context<Self>) {
+        match self.aggregates.iter().position(|a| *a == (agg, column)) {
+            Some(at) => {
+                self.aggregates.remove(at);
+            }
+            None => self.aggregates.push((agg, column)),
+        }
+        cx.notify();
+    }
+
+    pub fn summary(&self) -> Option<Summary> {
+        if self.by.is_empty() && self.aggregates.is_empty() {
+            return None;
+        }
+        Some(Summary {
+            by: self.by.iter().map(|&i| self.columns[i].0.clone()).collect(),
+            aggregates: self
+                .aggregates
+                .iter()
+                .map(|(agg, col)| (*agg, col.map(|i| self.columns[i].0.clone())))
+                .collect(),
+            sort: None,
+        })
+    }
+}
+
+impl Render for SummarizeDialog {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let chip = |id: ElementId, label: String, on: bool| {
+            div()
+                .id(id)
+                .px_2()
+                .py_0p5()
+                .rounded(px(10.))
+                .border_1()
+                .border_color(if on { theme.primary } else { theme.border })
+                .when(on, |el| el.bg(theme.primary.opacity(0.15)))
+                .text_xs()
+                .cursor_pointer()
+                .child(label)
+        };
+        let heading = |text: &str| {
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(text.to_owned())
+        };
+        let by = h_flex()
+            .gap_1()
+            .flex_wrap()
+            .children(self.columns.iter().enumerate().map(|(ix, (source, _))| {
+                chip(
+                    ("group-by", ix).into(),
+                    source.label(),
+                    self.by.contains(&ix),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.toggle_by(ix, cx)))
+            }));
+        let mut aggregates = vec![
+            chip(
+                "agg-count".into(),
+                "count rows".into(),
+                self.aggregates.contains(&(Agg::Count, None)),
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_aggregate(Agg::Count, None, cx))),
+        ];
+        let mut n: usize = 0;
+        for (ix, (source, numeric)) in self.columns.iter().enumerate() {
+            let aggs: &[Agg] = if *numeric {
+                &[Agg::Sum, Agg::Avg, Agg::Min, Agg::Max]
+            } else {
+                &[Agg::Min, Agg::Max, Agg::List]
+            };
+            for agg in aggs {
+                n += 1;
+                let agg = *agg;
+                aggregates.push(
+                    chip(
+                        ("agg", n).into(),
+                        format!("{}({})", agg.label(), source.label()),
+                        self.aggregates.contains(&(agg, Some(ix))),
+                    )
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.toggle_aggregate(agg, Some(ix), cx)),
+                    ),
+                );
+            }
+        }
+        let summary = self.summary();
+        let on_apply = self.on_apply.clone();
+        v_flex()
+            .gap_3()
+            .child(heading("Group by"))
+            .child(by)
+            .child(heading("Aggregates"))
+            .child(
+                div()
+                    .id("aggregates")
+                    .max_h(px(240.))
+                    .overflow_y_scroll()
+                    .child(h_flex().gap_1().flex_wrap().children(aggregates)),
+            )
+            .child(
+                h_flex().justify_end().child(
+                    Button::new("apply-summary")
+                        .primary()
+                        .small()
+                        .label("Summarize")
+                        .on_click(move |_, window, cx| {
+                            if let Some(summary) = summary.clone() {
+                                window.close_dialog(cx);
+                                on_apply(summary, window, cx);
                             }
                         }),
                 ),

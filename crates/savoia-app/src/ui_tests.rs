@@ -1610,3 +1610,90 @@ async fn join_dialog_suggests_a_pair(cx: &mut TestAppContext) {
         )
     );
 }
+
+/// Summarize groups the view's rows, lookups included, with aggregates;
+/// "Back to rows" returns to the rows.
+#[gpui_kit::test]
+async fn postgres_data_view_summarizes(cx: &mut TestAppContext) {
+    use savoia_core::data_query::{Agg, Hop, Source, Summary};
+
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        &REL_SCHEMA.replace("it_rel", "it_sum"),
+    );
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_sum".into(),
+        table: Some("orders".into()),
+    };
+    let (window, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| DataView::new(ds.clone(), node, Vec::new(), window, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the rows", |cx| {
+        view.read_with(cx, |v, cx| v.rows(cx) == Some((4, false)))
+    });
+    let country = Source::Lookup {
+        path: vec![
+            Hop {
+                columns: vec!["customer_id".into()],
+                schema: "it_sum".into(),
+                table: "customers".into(),
+                ref_columns: vec!["id".into()],
+            },
+            Hop {
+                columns: vec!["country_code".into()],
+                schema: "it_sum".into(),
+                table: "countries".into(),
+                ref_columns: vec!["code".into()],
+            },
+        ],
+        column: "name".into(),
+    };
+    let summary = Summary {
+        by: vec![country],
+        aggregates: vec![
+            (Agg::Count, None),
+            (Agg::Sum, Some(Source::Base("total".into()))),
+        ],
+        sort: Some((1, true)),
+    };
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |v, cx| v.summarize(Some(summary), window, cx))
+    })
+    .unwrap();
+    wait_until(cx, "the groups", |cx| {
+        view.read_with(cx, |v, cx| v.rows(cx) == Some((3, false)))
+    });
+    let groups = view.read_with(cx, |v, cx| {
+        let grid = v.grid().unwrap();
+        let rows = grid.read(cx).delegate();
+        (0..rows.len())
+            .map(|i| {
+                rows.row(i)
+                    .iter()
+                    .map(|c| c.as_deref().unwrap_or("NULL").to_owned())
+                    .collect::<Vec<_>>()
+                    .join("|")
+            })
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(groups, ["Italy|2|7", "France|1|7", "NULL|1|1"]);
+
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |v, cx| v.summarize(None, window, cx))
+    })
+    .unwrap();
+    wait_until(cx, "the rows again", |cx| {
+        view.read_with(cx, |v, cx| v.rows(cx) == Some((4, false)))
+    });
+}

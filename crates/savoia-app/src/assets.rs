@@ -31,6 +31,7 @@ icon_assets!(
         RotateCcw,
         Scan,
         Server,
+        Sigma,
         SquarePen,
         SquareTerminal,
         Table,

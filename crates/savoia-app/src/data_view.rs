@@ -29,12 +29,12 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use savoia_core::data_query::{Agg, Filter, Hop, Op, PAGE_SIZE, Source, TableQuery};
+use savoia_core::data_query::{Agg, Filter, Hop, Op, PAGE_SIZE, Source, Summary, TableQuery};
 use savoia_core::edit::EditTarget;
 use savoia_core::{ConnectionId, Engine, TableInfo, TableKind};
 
 use crate::data_grid::{self, DataRows, GridColumn, Request, Source as RowSource};
-use crate::data_pickers::{ColumnPicker, JoinDialog, RowPicker};
+use crate::data_pickers::{ColumnPicker, JoinDialog, RowPicker, SummarizeDialog};
 use crate::data_sources::DataSources;
 use crate::explorer::NodeRef;
 use crate::relations::{self, Link, Tables};
@@ -260,6 +260,7 @@ impl DataView {
             filters: std::mem::take(&mut self.initial_filters),
             sort: None,
             key,
+            summary: None,
         };
         let read_only_source = self
             .data_sources
@@ -293,21 +294,33 @@ impl DataView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<TableState<DataRows>> {
-        let columns: Vec<GridColumn> = query
-            .columns
-            .iter()
-            .map(|source| self.grid_column(info, source))
-            .collect();
-        let labels = SearchableVec::new(
-            columns
+        let columns: Vec<GridColumn> = match &query.summary {
+            Some(summary) => self.summary_columns(info, summary),
+            None => query
+                .columns
                 .iter()
-                .map(|c| SharedString::from(c.label.clone()))
+                .map(|source| self.grid_column(info, source))
+                .collect(),
+        };
+        // Filters apply to rows, so they choose among the row columns even
+        // while the view shows groups.
+        let labels = SearchableVec::new(
+            query
+                .columns
+                .iter()
+                .map(|s| SharedString::from(s.label()))
                 .collect::<Vec<_>>(),
         );
         self.filter_column =
             Some(cx.new(|cx| SelectState::new(labels, Some(IndexPath::new(0)), window, cx)));
-        let mut rows = DataRows::new(columns, &query.key, self.read_only.is_none());
-        rows.relations = self.row_relations(query);
+        let mut rows = if query.summary.is_some() {
+            DataRows::new(columns, &[], false)
+        } else {
+            let mut rows = DataRows::new(columns, &query.key, self.read_only.is_none());
+            rows.relations = self.row_relations(query);
+            rows
+        };
+        rows.loading = true;
         let grid = cx.new(|cx| {
             TableState::new(rows, window, cx)
                 .cell_selectable(true)
@@ -318,6 +331,87 @@ impl DataView {
             cx.subscribe_in(&grid, window, Self::on_table_event),
         ];
         grid
+    }
+
+    /// Group columns as they are, then aggregates; all read-only.
+    fn summary_columns(&self, info: &TableInfo, summary: &Summary) -> Vec<GridColumn> {
+        let by = summary.by.iter().map(|source| GridColumn {
+            base: None,
+            picks_from: None,
+            ..self.grid_column(info, source)
+        });
+        let aggregates = summary.aggregates.iter().map(|(agg, source)| {
+            let numeric_source = source
+                .as_ref()
+                .is_some_and(|s| self.grid_column(info, s).numeric);
+            GridColumn {
+                label: String::new(),
+                base: None,
+                numeric: match agg {
+                    Agg::Count | Agg::Sum | Agg::Avg => true,
+                    Agg::Min | Agg::Max => numeric_source,
+                    Agg::List => false,
+                },
+                picks_from: None,
+            }
+        });
+        by.chain(aggregates)
+            .zip(summary.labels())
+            .map(|(column, label)| GridColumn { label, ..column })
+            .collect()
+    }
+
+    /// Shows groups instead of rows, or rows again with `None`.
+    pub fn summarize(
+        &mut self,
+        summary: Option<Summary>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .grid_entity()
+            .is_some_and(|g| g.read(cx).delegate().has_changes())
+        {
+            self.error = Some("Commit or discard your changes first.".into());
+            cx.notify();
+            return;
+        }
+        let State::Ready { info, query, .. } = &mut self.state else {
+            return;
+        };
+        query.summary = summary;
+        let (info, query) = (info.clone(), query.clone());
+        let grid = self.new_grid(&info, &query, window, cx);
+        if let State::Ready { grid: slot, .. } = &mut self.state {
+            *slot = grid;
+        }
+        self.load_page(true, cx);
+    }
+
+    fn show_summarize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let State::Ready { info, query, .. } = &self.state else {
+            return;
+        };
+        // Summary columns can't be grouped or aggregated again.
+        let columns: Vec<(Source, bool)> = query
+            .columns
+            .iter()
+            .filter(|s| !matches!(s, Source::Summary { .. }))
+            .map(|s| (s.clone(), self.grid_column(info, s).numeric))
+            .collect();
+        let view = cx.entity().downgrade();
+        let dialog = cx.new(|_| {
+            SummarizeDialog::new(
+                columns,
+                Rc::new(move |summary, window, cx| {
+                    view.update(cx, |v, cx| v.summarize(Some(summary), window, cx))
+                        .ok();
+                }),
+            )
+        });
+        window.open_dialog(cx, move |d, _, _| {
+            d.title("Summarize").w(px(560.)).child(dialog.clone())
+        });
     }
 
     fn grid_column(&self, info: &TableInfo, source: &Source) -> GridColumn {
@@ -672,7 +766,12 @@ impl DataView {
         match request {
             Request::Sort(sort) => {
                 if let State::Ready { query, .. } = &mut self.state {
-                    query.sort = sort.map(|(col, desc)| (query.columns[col].clone(), desc));
+                    match &mut query.summary {
+                        Some(summary) => summary.sort = sort,
+                        None => {
+                            query.sort = sort.map(|(col, desc)| (query.columns[col].clone(), desc))
+                        }
+                    }
                 }
                 self.reload(cx);
             }
@@ -1079,12 +1178,14 @@ impl DataView {
             }
             _ => (0, false, true),
         };
+        let summarized = self.query().is_some_and(|q| q.summary.is_some());
+        let noun = if summarized { "groups" } else { "rows" };
         let count = if loading {
             "loading…".to_string()
         } else if more {
-            format!("{loaded}+ rows")
+            format!("{loaded}+ {noun}")
         } else {
-            format!("{loaded} rows")
+            format!("{loaded} {noun}")
         };
         let path = format!("{} › {}", self.node.schema, self.title());
         h_flex()
@@ -1118,7 +1219,32 @@ impl DataView {
                 )
             })
             .child(div().flex_1())
-            .when(self.filter_column.is_some(), |bar| {
+            .when(summarized, |bar| {
+                bar.child(
+                    Button::new("back-to-rows")
+                        .ghost()
+                        .xsmall()
+                        .icon(Icon::new(IconName::ArrowLeft))
+                        .label("Back to rows")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.summarize(None, window, cx)),
+                        ),
+                )
+            })
+            .when(!summarized && self.filter_column.is_some(), |bar| {
+                bar.child(
+                    Button::new("summarize")
+                        .ghost()
+                        .xsmall()
+                        .icon(Icon::new(Lucide::Sigma))
+                        .label("Summarize")
+                        .tooltip("Group rows and aggregate them")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.show_summarize(window, cx)),
+                        ),
+                )
+            })
+            .when(!summarized && self.filter_column.is_some(), |bar| {
                 bar.child(
                     Button::new("add-column")
                         .ghost()
@@ -1130,7 +1256,7 @@ impl DataView {
                 )
             })
             .when(
-                self.read_only.is_none() && self.filter_column.is_some(),
+                !summarized && self.read_only.is_none() && self.filter_column.is_some(),
                 |bar| {
                     bar.child(
                         Button::new("add-row")
