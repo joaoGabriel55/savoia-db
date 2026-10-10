@@ -13,6 +13,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changeset:
+    name: Changeset
+    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # A reminder, not a gate: changes users won't notice need no changeset.
+      - run: |
+          npx changeset status --since=origin/${{ github.base_ref }} \
+            || echo "::warning::No changeset in this PR. If users will notice the change, run \`npx changeset\` and commit the file."
+
   checks:
     name: Lint & test
     runs-on: ubuntu-latest

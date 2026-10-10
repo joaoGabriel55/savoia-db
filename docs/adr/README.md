@@ -73,3 +73,4 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-10 | [License under MIT or Apache-2.0 and distribute through GitHub Releases](./202610100805-license-under-mit-or-apache-2-and-distribute-through-github-releases.md) | Accepted |
 | 2026-10-10 | [Report crashes as user-reviewed GitHub issues](./202610100806-report-crashes-as-user-reviewed-github-issues.md) | Proposed |
 | 2026-10-10 | [Use the crowned Savoy shield as the app icon](./202610100830-use-the-crowned-savoy-shield-as-the-app-icon.md) | Accepted |
+| 2026-10-10 | [Version releases with Changesets](./202610101305-version-releases-with-changesets.md) | Accepted |

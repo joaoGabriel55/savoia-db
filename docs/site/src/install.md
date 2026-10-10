@@ -5,11 +5,11 @@ Download the installer for your system from the [latest release](https://github.
 | System | File |
 | --- | --- |
 | macOS (Apple silicon) | `savoia-studio_<version>_aarch64.dmg` |
-| macOS (Intel) | `savoia-studio_<version>_x86_64.dmg` |
-| Windows | `savoia-studio_<version>_x64-setup.exe`, or the `.msi` |
-| Debian, Ubuntu | `.deb` |
-| Fedora, openSUSE | `.rpm` |
-| Any Linux | `.AppImage`. Make it executable and run it. |
+| macOS (Intel) | `savoia-studio_<version>_x64.dmg` |
+| Windows | `savoia-studio_<version>_x64-setup.exe`, or `savoia-studio_<version>_x64_en-US.msi` |
+| Debian, Ubuntu | `savoia-studio_<version>_amd64.deb` |
+| Fedora, openSUSE | `savoia-studio-<version>-1.x86_64.rpm` |
+| Any Linux | `savoia-studio_<version>_x86_64.AppImage`. Make it executable (`chmod +x`) and run it. |
 
 ## Updates
 

@@ -1,6 +1,6 @@
-# Changelog
+# savoia-studio
 
-## 0.1.0 (unreleased)
+## 0.1.0
 
 The first release of Savoia Studio, a native database client for PostgreSQL and MySQL.
 

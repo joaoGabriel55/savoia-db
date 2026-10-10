@@ -14,3 +14,4 @@ target/
 .agents/skills/impeccable/scripts/bin/
 .github/skills/impeccable/scripts/bin/
 /docs/site/book
+/node_modules
