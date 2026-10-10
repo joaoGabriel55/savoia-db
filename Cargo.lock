@@ -7142,7 +7142,10 @@ name = "savoia-transfer"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "flate2",
  "savoia-core",
+ "savoia-mysql",
+ "savoia-pg",
  "tokio",
  "uuid",
 ]
