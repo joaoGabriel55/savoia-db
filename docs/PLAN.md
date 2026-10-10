@@ -80,7 +80,7 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 - Summaries: group by plus aggregates, read-only.
 - Read-only mode enforced in Rust as well as the UI (PG `default_transaction_read_only`, MySQL `SET SESSION TRANSACTION READ ONLY`).
 
-### M4: Dump and import (weeks 9–11)
+### M4: Dump and import (weeks 9–11) ✅
 - Tools detection (PATH + custom paths) and version check against the server.
 - External runner: pg_dump/pg_restore/psql, mysqldump/mysql. Secrets via `PGPASSFILE`/`--defaults-extra-file` temp files (0600, deleted after). Progress parsing, cancel, log viewer.
 - Built-in exporter: DDL from catalogs + data (`COPY TO STDOUT` / streaming SELECT) → `.sql`, `.sql.gz`, CSV.

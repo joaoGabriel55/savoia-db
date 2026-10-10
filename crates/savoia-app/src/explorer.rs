@@ -119,6 +119,8 @@ pub enum ExplorerEvent {
     ShowStructure(NodeRef),
     /// Browse a table's or view's rows; the node has a table.
     OpenData(NodeRef),
+    /// Open the dump or import wizard on the node's schema (and table, if any).
+    Transfer(NodeRef, crate::transfer::Direction),
     /// SQL for a query console on `connection`.
     Sql {
         connection: ConnectionId,
@@ -638,6 +640,15 @@ impl Explorer {
                     cx.emit(ExplorerEvent::ShowStructure(node));
                 }
             }
+            TableAction::Export | TableAction::Import => {
+                if let Some(node) = self.nodes.get(&row).cloned() {
+                    let direction = match action {
+                        TableAction::Export => crate::transfer::Direction::Export,
+                        _ => crate::transfer::Direction::Import,
+                    };
+                    cx.emit(ExplorerEvent::Transfer(node, direction));
+                }
+            }
             TableAction::CopyName => {
                 cx.write_to_clipboard(ClipboardItem::new_string(object.name.clone()))
             }
@@ -731,6 +742,8 @@ impl Explorer {
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected_connection(cx);
         let node = self.selected_node(cx);
+        let has_node = node.is_some();
+        let (dump_node, import_node) = (node.clone(), node.clone());
         let connected = selected.is_some_and(|id| {
             matches!(
                 self.data_sources.read(cx).state(id),
@@ -819,9 +832,39 @@ impl Explorer {
                         }
                     })),
             )
-            .child(button("ex-dump", Icon::new(Lucide::Download), "Dump… (M4)").band_disabled(true))
             .child(
-                button("ex-import", Icon::new(Lucide::Upload), "Import… (M4)").band_disabled(true),
+                button("ex-dump", Icon::new(Lucide::Download), "Dump the schema…")
+                    .band_disabled(!has_node || !connected)
+                    .on_click(cx.listener({
+                        move |_, _, _, cx| {
+                            if let Some(node) = dump_node.clone() {
+                                let schema = NodeRef {
+                                    table: None,
+                                    ..node
+                                };
+                                cx.emit(ExplorerEvent::Transfer(
+                                    schema,
+                                    crate::transfer::Direction::Export,
+                                ));
+                            }
+                        }
+                    })),
+            )
+            .child(
+                button(
+                    "ex-import",
+                    Icon::new(Lucide::Upload),
+                    "Import into the schema…",
+                )
+                .band_disabled(!has_node || !connected)
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    if let Some(node) = import_node.clone() {
+                        cx.emit(ExplorerEvent::Transfer(
+                            node,
+                            crate::transfer::Direction::Import,
+                        ));
+                    }
+                })),
             )
     }
 

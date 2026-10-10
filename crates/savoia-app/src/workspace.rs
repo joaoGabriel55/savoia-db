@@ -24,6 +24,7 @@ use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
 use crate::memory::MemoryMeter;
 use crate::structure::StructureView;
 use crate::theme;
+use crate::transfer::{Direction, TransferView};
 use savoia_core::data_query::Filter;
 
 actions!(workspace, [NewConsole]);
@@ -38,6 +39,7 @@ enum Page {
     Diagram(Entity<ErDiagram>),
     Structure(Entity<StructureView>),
     Data(Entity<DataView>),
+    Transfer(Entity<TransferView>),
 }
 
 pub struct Workspace {
@@ -60,8 +62,10 @@ impl Workspace {
 
     /// For `scripts/dev.sh`, which restarts the app on every change:
     /// `SAVOIA_DEV_RECONNECT=1` connects the last-used data source, and
-    /// `SAVOIA_DEV_OPEN=schema.table` then opens that table's data view, so
-    /// each restart lands where you were.
+    /// `SAVOIA_DEV_OPEN=schema.table` then opens that table's data view (or,
+    /// with `SAVOIA_DEV_TRANSFER=export|import`, the dump or import wizard on
+    /// it; `schema` alone for the whole schema), so each restart lands where
+    /// you were.
     fn dev_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if std::env::var_os("SAVOIA_DEV_RECONNECT").is_none() {
             return;
@@ -74,15 +78,20 @@ impl Workspace {
         let Some(target) = std::env::var("SAVOIA_DEV_OPEN").ok() else {
             return;
         };
-        let Some((schema, table)) = target
-            .split_once('.')
-            .map(|(s, t)| (s.to_owned(), t.to_owned()))
-        else {
-            return;
+        let transfer = match std::env::var("SAVOIA_DEV_TRANSFER").as_deref() {
+            Ok("export") => Some(Direction::Export),
+            Ok("import") => Some(Direction::Import),
+            _ => None,
+        };
+        let (schema, table) = match target.split_once('.') {
+            Some((s, t)) => (s.to_owned(), Some(t.to_owned())),
+            None if transfer.is_some() => (target.clone(), None),
+            None => return,
         };
         let mut opened = false;
         let subscription =
-            cx.observe_in(&self.data_sources, window, move |this, ds, window, cx| {
+            // DataSources announces a finished connect with an event, not a notify.
+            cx.subscribe_in(&self.data_sources, window, move |this, ds, _: &DataSourcesEvent, window, cx| {
                 let SourceState::Connected(session) = ds.read(cx).state(id) else {
                     return;
                 };
@@ -102,9 +111,14 @@ impl Workspace {
                     connection: id,
                     database,
                     schema: schema.clone(),
-                    table: Some(table.clone()),
+                    table: table.clone(),
                 };
-                this.open_data(node, Vec::new(), window, cx);
+                match transfer {
+                    Some(direction) => {
+                        this.open_transfer(node, direction, window, cx);
+                    }
+                    None => this.open_data(node, Vec::new(), window, cx),
+                }
             });
         self._subscriptions.push(subscription);
     }
@@ -161,8 +175,10 @@ impl Workspace {
             return;
         }
         // Cancel now: the last frame may keep the view alive a little longer.
-        if let Page::Console(console) = self.pages.remove(index) {
-            console.update(cx, |console, cx| console.cancel(cx));
+        match self.pages.remove(index) {
+            Page::Console(console) => console.update(cx, |console, cx| console.cancel(cx)),
+            Page::Transfer(view) => view.update(cx, |view, cx| view.cancel(cx)),
+            _ => {}
         }
         if self.active > index || self.active == self.pages.len() {
             self.active = self.active.saturating_sub(1);
@@ -290,6 +306,24 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Opens a dump or import wizard on `node`. Each opens anew: two
+    /// exports of the same schema can differ in every option.
+    pub fn open_transfer(
+        &mut self,
+        node: NodeRef,
+        direction: Direction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TransferView> {
+        let data_sources = self.data_sources.clone();
+        let view = cx.new(|cx| TransferView::new(data_sources, node, direction, window, cx));
+        cx.observe(&view, |_, _, cx| cx.notify()).detach();
+        self.pages.push(Page::Transfer(view.clone()));
+        self.active = self.pages.len() - 1;
+        cx.notify();
+        view
+    }
+
     fn on_data_view_event(
         &mut self,
         _: &Entity<DataView>,
@@ -320,6 +354,9 @@ impl Workspace {
             ExplorerEvent::ShowDiagram(node) => self.show_diagram(node.clone(), cx),
             ExplorerEvent::ShowStructure(node) => self.show_structure(node.clone(), cx),
             ExplorerEvent::OpenData(node) => self.open_data(node.clone(), Vec::new(), window, cx),
+            ExplorerEvent::Transfer(node, direction) => {
+                self.open_transfer(node.clone(), *direction, window, cx);
+            }
             ExplorerEvent::Sql {
                 connection,
                 sql,
@@ -537,6 +574,24 @@ impl Render for Workspace {
                             .label(view.read(cx).title())
                             .prefix(Icon::new(Lucide::Table).small().ml_2().text_color(color))
                     }
+                    Page::Transfer(view) => {
+                        let view = view.read(cx);
+                        let color = ds
+                            .get(view.connection())
+                            .and_then(|c| c.color)
+                            .map_or(muted, |c| rgb(c.rgb()).into());
+                        let icon = if view.is_running() {
+                            Lucide::LoaderCircle
+                        } else {
+                            match view.direction() {
+                                Direction::Export => Lucide::Download,
+                                Direction::Import => Lucide::Upload,
+                            }
+                        };
+                        Tab::new()
+                            .label(view.title())
+                            .prefix(Icon::new(icon).small().ml_2().text_color(color))
+                    }
                     Page::Structure(view) => Tab::new().label(view.read(cx).title()).prefix(
                         Icon::new(Lucide::TableProperties)
                             .small()
@@ -564,6 +619,7 @@ impl Render for Workspace {
             Some(Page::Diagram(diagram)) => diagram.clone().into_any_element(),
             Some(Page::Structure(view)) => view.clone().into_any_element(),
             Some(Page::Data(view)) => view.clone().into_any_element(),
+            Some(Page::Transfer(view)) => view.clone().into_any_element(),
             None => v_flex()
                 .size_full()
                 .items_center()

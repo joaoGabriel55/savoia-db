@@ -2,8 +2,7 @@
 //!
 //! The menu opens with an identity header (what you are about to touch, on
 //! which connection, and whether it is read-only), then short groups of
-//! actions with the most used first and destructive ones last. Actions from
-//! later milestones stay visible but disabled, tagged with their milestone.
+//! actions with the most used first and destructive ones last.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -140,6 +139,8 @@ pub enum TableAction {
     NewSelect,
     CopyName,
     CopyQualifiedName,
+    Export,
+    Import,
     Truncate,
     Drop,
 }
@@ -169,15 +170,6 @@ pub fn build(
         let on_action = on_action.clone();
         entry(icon, label, hint, tone, false)
             .on_click(move |_, window, cx| on_action(action, window, cx))
-    };
-    let later = |icon: Icon, label: &str, milestone: &str| {
-        entry(
-            icon,
-            label.into(),
-            Some(milestone.into()),
-            Tone::Normal,
-            true,
-        )
     };
     let danger = |icon: Icon, label: String, action| {
         if origin.read_only {
@@ -235,9 +227,31 @@ pub fn build(
             TableAction::CopyQualifiedName,
         ))
         .separator()
-        .item(later(Icon::new(Lucide::Download), "Export…", "M4"))
+        .item(item(
+            Icon::new(Lucide::Download),
+            "Export…".into(),
+            Some("SQL, CSV, pg_dump".into()),
+            Tone::Normal,
+            TableAction::Export,
+        ))
         .when(is_table, |menu| {
-            menu.item(later(Icon::new(Lucide::Upload), "Import…", "M4"))
+            if origin.read_only {
+                menu.item(entry(
+                    Icon::new(Lucide::Upload),
+                    "Import…".into(),
+                    Some("read-only".into()),
+                    Tone::Normal,
+                    true,
+                ))
+            } else {
+                menu.item(item(
+                    Icon::new(Lucide::Upload),
+                    "Import…".into(),
+                    Some("CSV or SQL".into()),
+                    Tone::Normal,
+                    TableAction::Import,
+                ))
+            }
         })
         .separator()
         .when(is_table, |menu| {

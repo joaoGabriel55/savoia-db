@@ -194,6 +194,18 @@ impl DataSources {
             .unwrap_or_default()
     }
 
+    /// A saved preference; best-effort like history.
+    pub fn setting(&self, key: &str) -> Option<String> {
+        self.store.as_ref()?.setting(key).ok().flatten()
+    }
+
+    /// Saves a preference (`None` removes it); a failure is ignored.
+    pub fn set_setting(&mut self, key: &str, value: Option<&str>) {
+        if let Some(store) = &self.store {
+            drop(store.set_setting(key, value));
+        }
+    }
+
     pub fn state(&self, id: ConnectionId) -> &SourceState {
         self.states.get(&id).unwrap_or(&SourceState::Disconnected)
     }
@@ -238,7 +250,7 @@ impl DataSources {
             match target {
                 LoadTarget::Schemas { database } => session.load_schemas(&database).await,
                 LoadTarget::Objects { database, schema } => {
-                    session.load_objects(&database, &schema).await
+                    session.load_objects(&database, &schema).await.map(drop)
                 }
                 LoadTarget::Table {
                     database,

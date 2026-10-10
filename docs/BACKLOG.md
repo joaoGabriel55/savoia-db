@@ -3,7 +3,7 @@
 The work still missing from [PLAN.md](./PLAN.md), split into tasks small enough to ship one per PR.
 Each task lists where it lives, what "done" means, and a rough estimate for one developer.
 
-Status as of 2026-10-09: M0–M3 are done. M4 is in progress; M5 has not started.
+Status as of 2026-10-09: M0–M4 are done. M5 has not started.
 
 Legend: **[ ]** open · **[~]** partly done · **[x]** done
 
@@ -41,9 +41,9 @@ A no-SQL view per table that browses, edits and queries data, joins included. Se
 | 3.4 | [x] Read-only mode | Drivers already set `default_transaction_read_only` (PG) and read-only sessions (MySQL). Left: disable edit UI and show a read-only badge. | ¼ day |
 | 3.5 | [x] Summaries | Group by plus aggregates, read-only; "Save as query" opens the SQL in a console. | 2 days |
 
-## Now: M4 (Dump and import), about 3 weeks
+## Done: M4 (Dump and import)
 
-Lives in the `savoia-transfer` crate. Tools are detected, not bundled: see the [ADR](./adr/202610092308-detect-installed-dump-tools-instead-of-bundling-them.md). The Export… and Import… menu items are already in place, disabled and tagged M4.
+Lives in the `savoia-transfer` crate. Tools are detected, not bundled: see the [ADR](./adr/202610092308-detect-installed-dump-tools-instead-of-bundling-them.md). The wizards open from the explorer's Dump…/Import… buttons and the table menu's Export…/Import….
 
 | # | Task |
 |---|------|
@@ -51,11 +51,11 @@ Lives in the `savoia-transfer` crate. Tools are detected, not bundled: see the [
 | 4.2 | [x] External runner: pass secrets through 0600 temp files (`PGPASSFILE`, `--defaults-extra-file`), parse progress, cancel, show the log. |
 | 4.3 | [x] Built-in exporter: DDL from the catalog plus data to `.sql`, `.sql.gz`, CSV. |
 | 4.4 | [x] Import: SQL file runner (reuses the 2.2 splitter; handles `$$`, `DELIMITER`, comments), CSV import with column mapping. |
-| 4.5 | [ ] Wizards: objects → options → destination → progress screen. |
-| 4.6 | [ ] Dump and import through SSH tunnels. |
-| 4.7 | [ ] Round-trip test: dump → restore, compare schema and row checksums. |
+| 4.5 | [x] Wizards: objects → options → destination → progress screen. |
+| 4.6 | [x] Dump and import through SSH tunnels. |
+| 4.7 | [x] Round-trip test: dump → restore, compare schema and row checksums. |
 
-## Last: M5 (Polish and release), about 2 weeks
+## Now: M5 (Polish and release), about 2 weeks
 
 | # | Task |
 |---|------|

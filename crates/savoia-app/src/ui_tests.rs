@@ -23,6 +23,7 @@ use crate::explorer::{Explorer, NodeRef};
 use crate::history::HistoryPanel;
 use crate::session::Session;
 use crate::structure::StructureView;
+use crate::transfer::{Direction, TransferView};
 use crate::workspace::{NewConsole, Workspace};
 
 fn mount(
@@ -1750,4 +1751,208 @@ async fn postgres_column_picker_lists_relationships(cx: &mut TestAppContext) {
         window.render_frame(cx);
     })
     .unwrap();
+}
+
+/// Opens the dump or import wizard on `node` and waits for its tools and objects.
+fn open_wizard(
+    cx: &mut TestAppContext,
+    ds: &Entity<DataSources>,
+    node: NodeRef,
+    direction: Direction,
+) -> (AnyWindowHandle, Entity<TransferView>) {
+    let (window, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| TransferView::new(ds.clone(), node, direction, window, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the wizard to load", |cx| {
+        view.read_with(cx, |v, _| v.ready_for_test())
+    });
+    (window, view)
+}
+
+fn set_path(
+    cx: &mut TestAppContext,
+    window: AnyWindowHandle,
+    view: &Entity<TransferView>,
+    path: &str,
+) {
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |v, cx| v.set_path_for_test(path, window, cx));
+    })
+    .unwrap();
+}
+
+/// Clicks Next/Start until the job ends; returns how it ended and its log.
+fn run_wizard(
+    cx: &mut TestAppContext,
+    window: AnyWindowHandle,
+    view: &Entity<TransferView>,
+    steps: usize,
+) -> (crate::transfer::JobEnd, Vec<String>) {
+    for _ in 0..steps {
+        click(cx, window, "transfer-next");
+    }
+    for _ in 0..600 {
+        cx.run_until_parked();
+        if view.read_with(cx, |v, _| v.state_for_test().0.is_some()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let (end, log) = view.read_with(cx, |v, _| v.state_for_test());
+    let end = end.unwrap_or_else(|| panic!("the job didn't end; log:\n{}", log.join("\n")));
+    (end, log)
+}
+
+fn temp_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "savoia-ui-{}-{name}",
+        savoia_core::ConnectionId::new()
+    ))
+}
+
+/// The export wizard dumps a schema with pg_dump, then with the built-in
+/// engine; the import wizard maps a CSV's columns by name and loads it.
+#[gpui_kit::test]
+async fn postgres_wizard_exports_and_imports(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        "DROP SCHEMA IF EXISTS it_wizard CASCADE;
+         CREATE SCHEMA it_wizard;
+         CREATE TABLE it_wizard.people (id int PRIMARY KEY, name text, email text);
+         INSERT INTO it_wizard.people VALUES (1, 'Ada', NULL), (2, 'Grace', '');",
+    );
+    let schema = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_wizard".into(),
+        table: None,
+    };
+
+    // pg_dump, when installed: Objects → Options → Destination → Export.
+    let tool = savoia_transfer::tools::detect(
+        savoia_transfer::tools::Tool::PgDump,
+        &savoia_transfer::tools::ToolSearch::system(None),
+    );
+    if tool.is_some() {
+        let (window, view) = open_wizard(cx, &ds, schema.clone(), Direction::Export);
+        let out = temp_path("tool.sql");
+        set_path(cx, window, &view, &out.display().to_string());
+        let (end, log) = run_wizard(cx, window, &view, 3);
+        assert!(
+            matches!(end, crate::transfer::JobEnd::Succeeded(_)),
+            "{end:?}\n{}",
+            log.join("\n")
+        );
+        let dump = std::fs::read_to_string(&out).unwrap();
+        assert!(dump.contains("CREATE TABLE it_wizard.people"), "{dump}");
+        assert!(
+            log.iter().any(|l| l.starts_with("$ ")),
+            "the command line is logged"
+        );
+    }
+
+    // Built-in engine, picked on the options step.
+    let (window, view) = open_wizard(cx, &ds, schema.clone(), Direction::Export);
+    let out = temp_path("builtin.sql");
+    set_path(cx, window, &view, &out.display().to_string());
+    click(cx, window, "transfer-next");
+    click(cx, window, "use-built-in");
+    let (end, log) = run_wizard(cx, window, &view, 2);
+    assert!(
+        matches!(end, crate::transfer::JobEnd::Succeeded(_)),
+        "{end:?}\n{}",
+        log.join("\n")
+    );
+    assert!(
+        std::fs::read_to_string(&out)
+            .unwrap()
+            .contains("INSERT INTO \"it_wizard\".\"people\"")
+    );
+
+    // CSV import into the table, with its columns in another order.
+    let csv = temp_path("people.csv");
+    std::fs::write(
+        &csv,
+        "EMAIL,id,name,ignored\nlin@example.com,3,Lin,x\n,4,Mo,y\n",
+    )
+    .unwrap();
+    let table = NodeRef {
+        table: Some("people".into()),
+        ..schema
+    };
+    let (window, view) = open_wizard(cx, &ds, table, Direction::Import);
+    set_path(cx, window, &view, &csv.display().to_string());
+    wait_until(cx, "the column mapping", |cx| {
+        view.read_with(cx, |v, cx| v.mapping_for_test(cx).len() == 4)
+    });
+    // CSV columns → table columns (id=1, name=2, email=3; 0 = skip).
+    assert_eq!(
+        view.read_with(cx, |v, cx| v.mapping_for_test(cx)),
+        [3, 1, 2, 0]
+    );
+    let (end, log) = run_wizard(cx, window, &view, 2);
+    assert!(
+        matches!(end, crate::transfer::JobEnd::Succeeded(_)),
+        "{end:?}\n{}",
+        log.join("\n")
+    );
+    let rows = fetch(
+        session_of(cx, &ds).unwrap(),
+        "SELECT id::text, name, email FROM it_wizard.people ORDER BY id",
+    );
+    assert_eq!(
+        rows[2],
+        [
+            Some("3".into()),
+            Some("Lin".into()),
+            Some("lin@example.com".into())
+        ]
+    );
+    assert_eq!(rows[3], [Some("4".into()), Some("Mo".into()), None]);
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+}
+
+/// The MySQL export wizard dumps one table with mysqldump (or the built-in
+/// engine without it), from the table menu's starting point.
+#[gpui_kit::test]
+async fn mysql_wizard_exports_a_table(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_MYSQL_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        "DROP TABLE IF EXISTS it_wizard_people;
+         CREATE TABLE it_wizard_people (id int PRIMARY KEY, name text);
+         INSERT INTO it_wizard_people VALUES (1, 'Ada');",
+    );
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "savoia".into(),
+        table: Some("it_wizard_people".into()),
+    };
+    let (window, view) = open_wizard(cx, &ds, node, Direction::Export);
+    let out = temp_path("my.sql");
+    set_path(cx, window, &view, &out.display().to_string());
+    let (end, log) = run_wizard(cx, window, &view, 3);
+    assert!(
+        matches!(end, crate::transfer::JobEnd::Succeeded(_)),
+        "{end:?}\n{}",
+        log.join("\n")
+    );
+    let dump = std::fs::read_to_string(&out).unwrap();
+    assert!(dump.contains("it_wizard_people"), "{dump}");
+    assert!(!dump.contains("it_parts"), "only the picked table: {dump}");
 }

@@ -7085,6 +7085,7 @@ dependencies = [
  "savoia-mysql",
  "savoia-pg",
  "savoia-store",
+ "savoia-transfer",
  "savoia-tunnel",
  "serde_json",
  "tokio",
@@ -7146,6 +7147,7 @@ dependencies = [
  "savoia-core",
  "savoia-mysql",
  "savoia-pg",
+ "savoia-tunnel",
  "tokio",
  "uuid",
 ]

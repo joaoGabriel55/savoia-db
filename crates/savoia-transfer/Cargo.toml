@@ -9,13 +9,14 @@ license.workspace = true
 async-trait.workspace = true
 flate2 = "1.1"
 savoia-core.workspace = true
-tokio = { workspace = true, features = ["process"] }
+tokio = { workspace = true, features = ["process", "macros"] }
 uuid.workspace = true
 
 [dev-dependencies]
 savoia-mysql.workspace = true
 savoia-pg.workspace = true
-tokio = { workspace = true, features = ["process"] }
+savoia-tunnel.workspace = true
+tokio = { workspace = true, features = ["process", "macros"] }
 
 [lints]
 workspace = true

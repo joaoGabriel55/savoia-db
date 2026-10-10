@@ -3,5 +3,6 @@
 
 pub mod builtin;
 pub mod import;
+pub mod job;
 pub mod runner;
 pub mod tools;
