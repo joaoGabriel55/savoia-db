@@ -124,7 +124,10 @@ fn edit(theme: &mut Theme) {
     colors.table_head_foreground = c(INK_HEADER);
     colors.table_even = c(GRAPHITE_CANVAS);
     colors.table_hover = c(GRAPHITE_ROW_HOVER);
-    colors.table_active = c(SELECTION);
+    // GPUI Kit lays the active cell's fill *over* its content, so it must
+    // be see-through: Ivrea Line at low strength lands near Selection on
+    // the canvas while the value stays readable.
+    colors.table_active = c(IVREA_LINE).opacity(0.18);
     colors.table_active_border = c(IVREA_LINE);
     colors.table_row_border = c(GRAPHITE_RULE);
 
