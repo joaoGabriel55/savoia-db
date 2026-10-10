@@ -21,11 +21,16 @@ Pull requests that change packaging build every installer, unsigned, as a check 
 
 ## Each release
 
-1. Bump `version` in the root `Cargo.toml` (`[workspace.package]`) and run `cargo check` to update `Cargo.lock`.
-2. Move the *Unreleased* notes in `CHANGELOG.md` under the new version.
-3. Merge to `main`, then tag: `git tag v0.1.0 && git push origin v0.1.0`.
-4. Wait for the workflow. It fails if the tag doesn't match the crate version.
-5. Review the draft release: every installer, the `.sig` files and `latest.json` should be there. Then publish it. Installed copies see the update only after it is published.
+Versions and release notes come from [Changesets](https://github.com/changesets/changesets); see [the ADR](./adr/202610101305-version-releases-with-changesets.md).
+
+1. **In each PR users will notice,** run `npx changeset` (after `npm ci` once). Pick patch, minor or major and write one line for the changelog, then commit the generated `.changeset/*.md`. CI warns when a PR has none.
+2. **After merging to `main`,** the Changesets workflow opens or updates the **Release Savoia Studio** PR. It bumps `package.json`, `Cargo.toml` and `Cargo.lock` and writes `CHANGELOG.md`. Review the version and the notes.
+3. **Merge the Release PR.** The workflow tags `vX.Y.Z` and starts the release build (about 25 minutes).
+4. **Review the draft release:** every installer, the `.sig` files and `latest.json`. Then click **Publish release**. Installed copies see the update only after it is published.
+
+One-time setting: in Settings › Actions › General › Workflow permissions, tick *Allow GitHub Actions to create and approve pull requests*, or step 2 can't open the PR.
+
+Don't edit versions by hand: `package.json` is the source and `scripts/sync-version.mjs` copies it into Cargo. To release by hand anyway (for example, to rebuild a tag), run the Release workflow from the Actions tab and choose the tag as the ref.
 
 ## Building an installer locally
 

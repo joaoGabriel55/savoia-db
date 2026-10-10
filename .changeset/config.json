@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/@changesets/config/schema.json",
+  "baseBranch": "main",
+  "changelog": ["@changesets/changelog-github", { "repo": "joaoGabriel55/savoia-studio" }],
+  "commit": false,
+  "format": false,
+  "access": "restricted",
+  "privatePackages": { "version": true, "tag": false },
+  "updateInternalDependencies": "patch",
+  "fixed": [],
+  "linked": [],
+  "ignore": []
+}

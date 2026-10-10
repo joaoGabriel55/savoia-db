@@ -88,7 +88,7 @@ To change the data, edit `samples/generate_serie_a.py` and run it; it rewrites b
 
 ## Releasing
 
-Push a `v*` tag; see [docs/RELEASING.md](docs/RELEASING.md).
+Add a changeset to PRs users will notice (`npm ci`, then `npx changeset`); merging the generated "Release Savoia Studio" PR tags and builds the release. See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## License
 

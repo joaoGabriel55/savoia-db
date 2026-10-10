@@ -1,0 +1,17 @@
+{
+  "name": "savoia-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Release tooling only: Changesets owns the version, scripts/sync-version.mjs copies it into Cargo.toml.",
+  "license": "MIT OR Apache-2.0",
+  "repository": "github:joaoGabriel55/savoia-studio",
+  "scripts": {
+    "changeset": "changeset",
+    "version": "changeset version && node scripts/sync-version.mjs",
+    "tag": "node scripts/tag-release.mjs"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "1.0.1",
+    "@changesets/cli": "3.0.3"
+  }
+}

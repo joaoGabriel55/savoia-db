@@ -1,0 +1,60 @@
+name: Changesets
+
+# On every push to main:
+# - With changesets pending, opens or updates the "Version Packages" PR, which
+#   bumps package.json, Cargo.toml/Cargo.lock and CHANGELOG.md.
+# - Once that PR is merged (nothing pending), tags the new version and
+#   dispatches release.yml on the tag. A tag pushed with GITHUB_TOKEN starts no
+#   workflow on its own, but a workflow_dispatch does.
+# See docs/RELEASING.md.
+
+on:
+  push:
+    branches: [main]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  version:
+    name: Version or release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # sync-version.mjs runs `cargo update --workspace`.
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - name: Version PR
+        id: changesets
+        uses: changesets/action@v2.1.2
+        with:
+          version-script: npm run version
+          pr-title: Release Savoia Studio
+          commit-message: Release Savoia Studio
+          # release.yml drafts the GitHub Release from the tag.
+          create-github-releases: false
+          push-git-tags: false
+      - name: Tag the version
+        id: tag
+        if: steps.changesets.outputs.has-changesets == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm run tag --silent
+      - name: Start the release build
+        if: steps.tag.outputs.tagged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml --ref "${{ steps.tag.outputs.tag }}"
+          echo "Started release.yml on ${{ steps.tag.outputs.tag }}"

@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag like v0.1.0 builds every installer, signs what can be signed,
+# A v* tag builds every installer, signs what can be signed,
 # and publishes them with latest.json (the updater manifest) to a draft
 # GitHub Release. Review the draft, then publish it. See docs/RELEASING.md.
 #
@@ -10,6 +10,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # changesets.yml dispatches this on the tag it creates (--ref vX.Y.Z): a tag
+  # pushed with GITHUB_TOKEN doesn't trigger the push event above.
+  workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/release.yml"
@@ -49,7 +52,7 @@ jobs:
             cargo install cargo-generate-rpm --version 0.21.0 --locked
           fi
       - name: Check the tag matches the crate version
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.ref_type == 'tag'
         shell: bash
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="savoia-app"))')
@@ -127,7 +130,7 @@ jobs:
   publish:
     name: Draft the release
     needs: package
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,5 +144,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag \
-            --title "Savoia Studio ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md
+            --title "Savoia Studio ${GITHUB_REF_NAME#v}" --notes-file notes.md
