@@ -23,6 +23,9 @@ serde = { version = "1", features = ["derive"] }
 gpui-kit = { version = "=0.7.1", features = ["tree-sitter-sql"] }
 thiserror = "2"
 memory-stats = "1.2"
+# Types of gpui-kit's editor completion API; keep in step with gpui-base.
+lsp-types = "=0.97.0"
+anyhow = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

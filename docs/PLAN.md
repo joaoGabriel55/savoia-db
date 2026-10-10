@@ -13,7 +13,7 @@ Decisions behind this plan live in [`docs/adr/`](./adr/README.md). Open work, ta
 - Schema explorer: databases → schemas → tables/views/routines/sequences, plus columns, indexes, FKs and DDL view.
 - SQL editor: tabs, highlighting, schema-aware autocomplete, run the statement under the cursor or the selection, cancel, query history.
 - Result grid: virtualized and streamed, sort/filter, copy as TSV/CSV/JSON/INSERT, NULL vs empty distinction.
-- Table data view: paginated browse and inline edit (pending changes → generated SQL preview → commit). Edits are disabled in read-only mode.
+- Table data view: paginated browse and inline edit (pending changes → generated SQL preview → commit). Edits are disabled in read-only mode. It doubles as a no-SQL query view: related columns through foreign keys, filters, summaries ([ADR](./adr/202610091908-add-a-no-sql-data-view-with-visual-joins-to-v1.md)).
 - **Dump**: whole DB or selected schemas/tables; schema-only, data-only or both; SQL, custom (pg) or CSV per table. Progress, cancel, log.
 - **Import**: `.sql` file (stop or continue on error), CSV into a table with column mapping, pg custom archives via `pg_restore`.
 - Light and dark theme, keyboard-first, command palette.
@@ -64,17 +64,20 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 - `savoia-tunnel` (russh): password, private-key and agent auth; known_hosts verification with explicit trust; concurrent forwarded sessions.
 - UI: connection dialog (URL import, Test, Save, Save & Connect, color), explorer of real catalogs (double-click to connect, context menu, auto-open of the default schema), host-trust prompt, error notifications, live status bar.
 - Tests: unit tests, live suites against Docker (Postgres with TLS, MySQL, SSH bastion), and headless UI tests driving the real form and explorer. CI runs the live suites.
-- Deferred: password prompt on connect when nothing is stored (today the connect fails with an auth error); lazy loading of non-current Postgres databases (M2).
+- Deferred, then done in M2: password prompt on connect; lazy loading of non-current Postgres databases.
 
-### M2: Explore and query (weeks 4–6)
+### M2: Explore and query (weeks 4–6) ✅
 - Driver trait: list objects, describe table, execute (streamed), cancel.
 - Schema tree (lazy-loaded, with counts), multiple console tabs, schema-aware completion via the editor's completion provider (tables, columns, JOIN suggestions using FKs, like DataGrip).
 - Virtualized result grid, multiple result sets, timing/rows-affected, copy/export of results.
 - Query history (searchable).
+- Also shipped: run the statement at the caret (statement splitter in `savoia-core`), table Structure view with DDL, password prompt on connect, browsing of other Postgres databases.
 
-### M3: Data editing (weeks 7–8)
-- Table browser with server-side pagination/sort/filter.
-- Inline edits for rows with a PK/unique key: pending-change buffer → SQL preview → transaction commit/rollback.
+### M3: Data view (weeks 7–9)
+- No-SQL data view per table, with server-side pages, sort and filter chips.
+- Inline edits, inserts and deletes for rows with a PK/unique key: pending-change buffer → SQL preview → transaction commit/rollback ([ADR](./adr/202610091908-write-data-edits-as-generated-sql-in-one-previewed-transaction.md)).
+- Joins without join syntax: lookup columns through many-to-one FKs, summary columns and drill-down for one-to-many, an FK value picker ([ADR](./adr/202610091908-build-joins-from-foreign-key-relationship-paths.md)).
+- Summaries: group by plus aggregates, read-only.
 - Read-only mode enforced in Rust as well as the UI (PG `default_transaction_read_only`, MySQL `SET SESSION TRANSACTION READ ONLY`).
 
 ### M4: Dump and import (weeks 9–11)

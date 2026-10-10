@@ -2,11 +2,16 @@
 //! This crate has no UI or database-driver dependencies.
 
 mod catalog;
+pub mod complete;
 mod connection;
+pub mod ddl;
 mod driver;
 mod engine;
 mod error;
+pub mod export;
 mod query;
+pub mod split;
+pub mod sql_text;
 
 pub use catalog::{
     Catalog, ColumnInfo, DatabaseNode, ForeignKey, IndexInfo, ObjectCounts, SchemaNode,

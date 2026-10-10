@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use savoia_core::{AppError, AppResult, ConnectionConfig, ConnectionId, Secrets};
-use savoia_store::{ConnectionStore, FileSecrets, MemorySecrets, SecretStore};
+use savoia_store::{ConnectionStore, FileSecrets, HistoryEntry, MemorySecrets, SecretStore};
 use savoia_tunnel::HostKeyPolicy;
 
 use crate::runtime;
@@ -170,6 +170,22 @@ impl DataSources {
 
     pub fn get(&self, id: ConnectionId) -> Option<&ConnectionConfig> {
         self.connections.iter().find(|c| c.id == id)
+    }
+
+    /// Adds a console run to the query history. History is best-effort:
+    /// a failure to store it never interrupts the user.
+    pub fn record_history(&mut self, entry: &HistoryEntry) {
+        if let Some(store) = &self.store {
+            drop(store.record(entry));
+        }
+    }
+
+    /// The latest runs whose SQL contains `search`, newest first.
+    pub fn history(&self, search: &str, limit: usize) -> Vec<HistoryEntry> {
+        self.store
+            .as_ref()
+            .and_then(|store| store.history(search, limit).ok())
+            .unwrap_or_default()
     }
 
     pub fn state(&self, id: ConnectionId) -> &SourceState {

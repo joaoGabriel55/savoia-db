@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use gpui_kit::component::table::TableDelegate as _;
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext, WindowOptions};
+use gpui_kit::{
+    AnyWindowHandle, App, AppContext as _, Entity, TestAppContext, Window, WindowOptions,
+};
 use savoia_store::{ConnectionStore, MemorySecrets};
 
 use crate::connection_form::ConnectionForm;
@@ -17,7 +19,10 @@ use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, DataSourcesEvent, RefreshState, SourceState};
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, NodeRef};
+use crate::history::HistoryPanel;
 use crate::session::Session;
+use crate::structure::StructureView;
+use crate::workspace::{NewConsole, Workspace};
 
 fn mount(
     cx: &mut TestAppContext,
@@ -152,14 +157,14 @@ fn console_on(
     let (window, console) = cx
         .update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| QueryConsole::new(ds.clone(), explorer, window, cx))
+                cx.new(|cx| QueryConsole::new(ds.clone(), explorer, None, window, cx))
             })
         })
         .expect("window");
     (ds, console, window)
 }
 
-/// Types `sql` into the console and clicks Run.
+/// Types `sql` into the console and clicks Run script.
 fn run(
     cx: &mut TestAppContext,
     window: AnyWindowHandle,
@@ -175,7 +180,7 @@ fn run(
             .update(cx, |editor, cx| editor.set_value(sql, window, cx));
     })
     .unwrap();
-    click(cx, window, "run");
+    click(cx, window, "run-script");
 }
 
 /// Row count and first row of result `ix` (negative: from the end).
@@ -801,4 +806,306 @@ async fn postgres_explorer_loads_another_database_on_expand(cx: &mut TestAppCont
 
     // FORCE closes the explorer's connection to it.
     exec(session, "DROP DATABASE it_other WITH (FORCE)");
+}
+
+/// Each console tab keeps its own editor, runs on the source it was opened
+/// on, and closing it cancels its query.
+#[gpui_kit::test]
+async fn postgres_console_tabs_are_independent(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    let session = session_of(cx, &ds).expect("connected");
+    cx.update(|cx| {
+        crate::console::init(cx);
+        crate::workspace::init(cx);
+    });
+    let (window, workspace) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| Workspace::with_data_sources(ds.clone(), window, cx))
+            })
+        })
+        .expect("window");
+    let consoles = |cx: &mut TestAppContext| {
+        workspace.read_with(cx, |w, _| w.consoles().cloned().collect::<Vec<_>>())
+    };
+    workspace.update(cx, |w, cx| {
+        w.explorer()
+            .clone()
+            .update(cx, |e, cx| e.select_first_source(cx))
+    });
+    cx.update_window(window, |_, window, cx| {
+        workspace.update(cx, |w, cx| w.new_console(&NewConsole, window, cx));
+    })
+    .unwrap();
+    let [first, second] = consoles(cx).try_into().expect("two consoles");
+    assert_eq!(second.read_with(cx, |c, cx| c.source(cx)), Some(id));
+
+    // Only the active tab renders, so run each console directly.
+    let run_in = |cx: &mut TestAppContext, console: &Entity<QueryConsole>, sql: &str| {
+        let sql = sql.to_owned();
+        cx.update_window(window, |_, window, cx| {
+            console.update(cx, |c, cx| {
+                c.editor()
+                    .clone()
+                    .update(cx, |editor, cx| editor.set_value(sql, window, cx));
+                c.run(&crate::console::RunQuery, window, cx);
+            })
+        })
+        .unwrap();
+    };
+    run_in(cx, &first, "SELECT 1");
+    wait_until(cx, "the first run", |cx| {
+        !first.read_with(cx, |c, _| c.is_running())
+    });
+    run_in(cx, &second, "SELECT g FROM generate_series(1, 100000) g");
+    wait_until(cx, "the pause", |cx| paused(cx, &second));
+    assert!(session.is_busy());
+
+    workspace.update(cx, |w, cx| w.close(1, cx));
+    drop(second);
+    wait_until(cx, "the cancel", |_| !session.is_busy());
+    let [first] = consoles(cx).try_into().expect("one console");
+    let text = first.read_with(cx, |c, cx| c.editor().read(cx).value().to_string());
+    assert_eq!(text, "SELECT 1");
+}
+
+/// Run takes the statement at the caret; a selection wins over it.
+#[gpui_kit::test]
+async fn postgres_run_takes_the_statement_at_the_caret(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    let sql = "SELECT 1 AS one;\nSELECT 2 AS two;\nSELECT 3 AS three;";
+    let run_at = |cx: &mut TestAppContext, range: std::ops::Range<usize>| {
+        cx.update_window(window, |_, window, cx| {
+            console.update(cx, |c, cx| {
+                c.editor().clone().update(cx, |editor, cx| {
+                    editor.set_value(sql, window, cx);
+                    editor.set_selected_range(range, cx);
+                });
+                c.run(&crate::console::RunQuery, window, cx);
+            })
+        })
+        .unwrap();
+        wait_until(cx, "the run", |cx| {
+            !console.read_with(cx, |c, _| c.is_running())
+        });
+        let results = console.read_with(cx, |c, _| c.results().len());
+        (results, grid(cx, &console).1.last().cloned())
+    };
+    let caret = sql.find("2 AS").unwrap();
+    assert_eq!(run_at(cx, caret..caret), (1, Some("2".into())));
+    let three = sql.find("SELECT 3").unwrap();
+    assert_eq!(run_at(cx, three..sql.len()), (1, Some("3".into())));
+}
+
+/// The quick filter hides rows of the result; Copy takes the rows shown,
+/// with NULL kept apart from the empty string.
+#[gpui_kit::test]
+async fn postgres_result_filter_and_copy(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (_, console, window) = console_on(cx, &url);
+    run(
+        cx,
+        window,
+        &console,
+        "SELECT * FROM (VALUES (1, 'Roma'), (2, 'Torino'), (3, NULL), (4, '')) t(n, name)",
+    );
+    idle(cx, &console);
+    cx.update_window(window, |_, window, cx| {
+        let filter = console.read(cx).filter().clone();
+        filter.update(cx, |input, cx| input.set_value("tor", window, cx));
+        // Typing emits a change; `set_value` doesn't.
+        console.update(cx, |c, cx| c.apply_filter(cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        grid(cx, &console).1.last().map(String::as_str),
+        Some("Torino")
+    );
+
+    cx.update_window(window, |_, window, cx| {
+        let filter = console.read(cx).filter().clone();
+        filter.update(cx, |input, cx| input.set_value("", window, cx));
+        console.update(cx, |c, cx| c.apply_filter(cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    console.update(cx, |c, cx| c.copy_result(0, cx));
+    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    assert_eq!(
+        copied.as_deref(),
+        Some("n\tname\n1\tRoma\n2\tTorino\n3\t\\N\n4\t\n")
+    );
+}
+
+/// Every run lands in the history, failed ones with their error; search
+/// narrows it, and picking an entry hands its SQL back.
+#[gpui_kit::test]
+async fn postgres_runs_are_kept_in_the_history(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, console, window) = console_on(cx, &url);
+    run(cx, window, &console, "SELECT 41 + 1 AS answer");
+    idle(cx, &console);
+    run(cx, window, &console, "SELECT no_such_column");
+    idle(cx, &console);
+
+    let picked = Rc::new(RefCell::new(None));
+    let panel = cx
+        .update_window(window, |_, window, cx| {
+            let picked = picked.clone();
+            cx.new(|cx| {
+                HistoryPanel::new(
+                    ds.clone(),
+                    Rc::new(move |sql: String, _: &mut Window, _: &mut App| {
+                        *picked.borrow_mut() = Some(sql)
+                    }),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    let entries = panel.read_with(cx, |p, _| p.entries().to_vec());
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].sql, "SELECT no_such_column");
+    assert!(
+        entries[0]
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("no_such_column"))
+    );
+    assert_eq!((entries[1].rows, entries[1].error.as_deref()), (1, None));
+
+    cx.update_window(window, |_, window, cx| {
+        let search = panel.read(cx).search().clone();
+        search.update(cx, |input, cx| input.set_value("41", window, cx));
+        panel.update(cx, |p, cx| p.reload(cx));
+        panel.update(cx, |p, cx| p.pick(0, window, cx));
+    })
+    .unwrap();
+    assert_eq!(panel.read_with(cx, |p, _| p.entries().len()), 1);
+    assert_eq!(picked.borrow().as_deref(), Some("SELECT 41 + 1 AS answer"));
+}
+
+/// The Structure tab lists a table's columns, keys and indexes, and the
+/// DDL rebuilt from them.
+#[gpui_kit::test]
+async fn postgres_structure_shows_columns_keys_and_ddl(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        "DROP SCHEMA IF EXISTS it_structure CASCADE;
+         CREATE SCHEMA it_structure;
+         CREATE TABLE it_structure.teams (id int PRIMARY KEY, name text NOT NULL);
+         CREATE TABLE it_structure.players (
+           id int PRIMARY KEY,
+           team_id int REFERENCES it_structure.teams (id),
+           shirt int DEFAULT 10);
+         CREATE INDEX players_shirt ON it_structure.players (shirt);",
+    );
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_structure".into(),
+        table: Some("players".into()),
+    };
+    let (window, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|cx| StructureView::new(ds.clone(), node, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the structure", |cx| {
+        view.read_with(cx, |v, _| v.loaded().is_some())
+    });
+    let info = view.read_with(cx, |v, _| v.loaded().unwrap());
+    let columns: Vec<_> = info.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(columns, ["id", "team_id", "shirt"]);
+    let ddl = view.read_with(cx, |v, cx| v.ddl(cx).unwrap());
+    assert!(ddl.contains("\"shirt\" integer DEFAULT 10"), "{ddl}");
+    assert!(
+        ddl.contains("REFERENCES \"it_structure\".\"teams\" (\"id\")"),
+        "{ddl}"
+    );
+    assert!(ddl.contains("CREATE INDEX \"players_shirt\""), "{ddl}");
+    assert_eq!(info.foreign_keys.len(), 1);
+    // Draws without panicking.
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+}
+
+/// Completion loads what it needs from the catalog, then suggests columns
+/// by alias and whole JOIN clauses from foreign keys.
+#[gpui_kit::test]
+async fn postgres_completion_suggests_columns_and_joins(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, console, window) = console_on(cx, &url);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        "DROP SCHEMA IF EXISTS it_complete CASCADE;
+         CREATE SCHEMA it_complete;
+         CREATE TABLE it_complete.customers (id int PRIMARY KEY, name text);
+         CREATE TABLE it_complete.orders (
+           id int PRIMARY KEY,
+           customer_id int REFERENCES it_complete.customers (id),
+           total numeric);",
+    );
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+
+    let complete = |cx: &mut TestAppContext, sql: &str| -> Vec<String> {
+        use gpui_kit::component::input::CompletionProvider as _;
+        let provider = crate::completion::SqlCompletion {
+            data_sources: ds.clone(),
+            console: console.downgrade(),
+        };
+        let rope = gpui_kit::component::Rope::from(sql);
+        let context = lsp_types::CompletionContext {
+            trigger_kind: lsp_types::CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        };
+        let task = cx
+            .update_window(window, |_, window, cx| {
+                provider.completions(&rope, sql.len(), context, window, cx)
+            })
+            .unwrap();
+        let done = Rc::new(RefCell::new(None));
+        let slot = done.clone();
+        cx.spawn(async move |_| *slot.borrow_mut() = Some(task.await))
+            .detach();
+        wait_until(cx, "the completions", |_| done.borrow().is_some());
+        let items = match done.take().unwrap().unwrap() {
+            lsp_types::CompletionResponse::Array(items) => items,
+            lsp_types::CompletionResponse::List(list) => list.items,
+        };
+        items.into_iter().map(|i| i.label).collect()
+    };
+
+    let columns = complete(cx, "SELECT * FROM it_complete.orders o WHERE o.");
+    assert_eq!(columns, ["id", "customer_id", "total"]);
+    let joins = complete(cx, "SELECT * FROM it_complete.orders o JOIN ");
+    assert_eq!(
+        joins.first().map(String::as_str),
+        Some("it_complete.customers c ON c.id = o.customer_id"),
+        "{joins:?}"
+    );
 }

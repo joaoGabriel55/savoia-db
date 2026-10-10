@@ -1,15 +1,18 @@
 //! Query console: toolbar, SQL editor and the output/result panes below it.
 //!
-//! Run sends the selection (or the whole editor) to the session selected in
-//! the explorer. A reader task moves the query's events into the grid, pausing
+//! Run sends the selection, else the statement at the caret, to the
+//! console's data source; Run script sends the whole editor. The data
+//! source is the one the console was opened on, else the one selected in the explorer
+//! at its first run. A reader task moves the query's events into the grid, pausing
 //! while the grid has enough rows (see [`Pacer`]).
 
+use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Editor, EditorState};
+use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::table::{DataTable, TableState};
@@ -19,16 +22,22 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use savoia_core::{AppError, QueryEvent};
+use std::path::PathBuf;
 
+use savoia_core::export::Format;
+use savoia_core::{AppError, ConnectionId, Engine, QueryEvent, split};
+use savoia_store::HistoryEntry;
+
+use crate::completion::SqlCompletion;
 use crate::data_sources::{DataSources, SourceState};
 use crate::explorer::Explorer;
+use crate::history::HistoryPanel;
 use crate::results::{Next, Pacer, ResultSet};
 use crate::session::{self, Session};
 use crate::theme::BandDisabled as _;
 use crate::{runtime, theme};
 
-actions!(console, [RunQuery]);
+actions!(console, [RunQuery, RunScript]);
 
 const CONTEXT: &str = "QueryConsole";
 
@@ -39,6 +48,12 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(
             "secondary-enter",
             RunQuery,
+            Some(&format!("{CONTEXT} > Input")),
+        ),
+        KeyBinding::new("secondary-shift-enter", RunScript, Some(CONTEXT)),
+        KeyBinding::new(
+            "secondary-shift-enter",
+            RunScript,
             Some(&format!("{CONTEXT} > Input")),
         ),
     ]);
@@ -67,12 +82,21 @@ struct OutputLine {
 /// `RunningQuery`, which cancels and drains in the background.
 struct Running {
     started: Instant,
+    ran_at: SystemTime,
+    source: ConnectionId,
+    sql: String,
+    /// Rows returned and affected so far, for the history.
+    rows: u64,
+    error: Option<String>,
     _reader: Task<()>,
 }
 
 pub struct QueryConsole {
     data_sources: Entity<DataSources>,
     explorer: Entity<Explorer>,
+    /// The data source this console runs on. `None` until the first run
+    /// when opened with nothing selected.
+    source: Option<ConnectionId>,
     editor: Entity<EditorState>,
     results: Vec<ResultTab>,
     output: Vec<OutputLine>,
@@ -80,27 +104,131 @@ pub struct QueryConsole {
     running: Option<Running>,
     /// Results and time of the last run, for the Output pane's header.
     summary: Option<SharedString>,
+    /// The engine of the last run, for copying results as SQL.
+    engine: Engine,
+    /// Quick filter over the rows of every result of the last run.
+    filter: Entity<InputState>,
+    /// A CSV export waiting for its result to finish loading.
+    pending_export: Option<(usize, PathBuf)>,
 }
 
 impl QueryConsole {
     pub fn new(
         data_sources: Entity<DataSources>,
         explorer: Entity<Explorer>,
+        source: Option<ConnectionId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| EditorState::new(window, cx).language("sql"));
+        let completion = SqlCompletion {
+            data_sources: data_sources.clone(),
+            console: cx.entity().downgrade(),
+        };
+        editor.update(cx, |editor, _| {
+            editor.lsp_mut().completion_provider = Some(Rc::new(completion));
+        });
         cx.observe(&explorer, |_, _, cx| cx.notify()).detach();
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter rows"));
+        cx.subscribe(&filter, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.apply_filter(cx);
+            }
+        })
+        .detach();
         Self {
             data_sources,
             explorer,
+            source,
             editor,
             results: Vec::new(),
             output: Vec::new(),
             pane: Pane::Output,
             running: None,
             summary: None,
+            engine: Engine::Postgres,
+            filter,
+            pending_export: None,
         }
+    }
+
+    pub(crate) fn apply_filter(&mut self, cx: &mut Context<Self>) {
+        let text = self.filter.read(cx).value().to_string();
+        for tab in &self.results {
+            tab.table.update(cx, |table, cx| {
+                table.delegate_mut().set_filter(&text);
+                table.refresh(cx);
+            });
+        }
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn filter(&self) -> &Entity<InputState> {
+        &self.filter
+    }
+
+    /// Copies the shown rows of result `ix` as TSV.
+    pub(crate) fn copy_result(&self, ix: usize, cx: &mut Context<Self>) {
+        if let Some(tab) = self.results.get(ix) {
+            let text = tab.table.read(cx).delegate().export(Format::Tsv, None);
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    /// Asks where to save result `ix` as CSV, loading the rest of it first
+    /// if it is still streaming.
+    fn export_result(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let directory = std::env::home_dir().unwrap_or_default();
+        let path = cx.prompt_for_new_path(&directory, Some("result.csv"));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(path))) = path.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                let Some(tab) = this.results.get(ix) else {
+                    return;
+                };
+                match tab.table.read(cx).delegate().pacer().cloned() {
+                    Some(pacer) => {
+                        pacer.load_all();
+                        this.pending_export = Some((ix, path));
+                        this.log("Loading the rest of the result to export it…".into(), false);
+                        cx.notify();
+                    }
+                    None => this.write_export(ix, path, cx),
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn write_export(&mut self, ix: usize, path: PathBuf, cx: &mut Context<Self>) {
+        let Some(tab) = self.results.get(ix) else {
+            return;
+        };
+        let rows = tab.table.read(cx).delegate();
+        let (text, shown) = (rows.export(Format::Csv, None), rows.shown_len());
+        cx.spawn(async move |this, cx| {
+            let target = path.clone();
+            let written = session::join(runtime::spawn_blocking(move || {
+                std::fs::write(&target, text).map_err(AppError::storage)
+            }))
+            .await;
+            this.update(cx, |this, cx| {
+                match written {
+                    Ok(()) => this.log(
+                        format!("Exported {} to {}", count(shown, "row"), path.display()),
+                        false,
+                    ),
+                    Err(err) => this.log(format!("Export failed: {err}"), true),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     #[cfg(test)]
@@ -129,16 +257,25 @@ impl QueryConsole {
         self.running.is_some()
     }
 
-    /// The session selected in the explorer, if it's connected.
-    fn session(&self, cx: &App) -> Result<Arc<Session>, &'static str> {
+    /// The data source this console runs on, or the one selected in the
+    /// explorer while it isn't bound yet.
+    pub fn source(&self, cx: &App) -> Option<ConnectionId> {
+        self.source
+            .or_else(|| self.explorer.read(cx).selected_connection(cx))
+    }
+
+    pub fn is_bound(&self) -> bool {
+        self.source.is_some()
+    }
+
+    /// The session of [`Self::source`], if it's connected.
+    fn session(&self, cx: &App) -> Result<(ConnectionId, Arc<Session>), &'static str> {
         let id = self
-            .explorer
-            .read(cx)
-            .selected_connection(cx)
+            .source(cx)
             .ok_or("Select a data source in the explorer to run queries.")?;
         match self.data_sources.read(cx).state(id) {
-            SourceState::Connected(session) => Ok(session.clone()),
-            _ => Err("Connect the selected data source to run queries."),
+            SourceState::Connected(session) => Ok((id, session.clone())),
+            _ => Err("Connect this console's data source to run queries."),
         }
     }
 
@@ -177,37 +314,60 @@ impl QueryConsole {
         cx.notify();
     }
 
-    fn sql(&self, cx: &App) -> String {
+    /// What a run sends: the selection if there is one, else the whole
+    /// editor (`script`) or the statement at the caret.
+    fn sql(&self, engine: Engine, script: bool, cx: &App) -> String {
         let editor = self.editor.read(cx);
         let selected = editor.selected_value();
-        let sql = if selected.trim().is_empty() {
-            editor.value()
-        } else {
-            selected
-        };
-        sql.to_string()
+        if !selected.trim().is_empty() {
+            return selected.to_string();
+        }
+        let text = editor.value();
+        if script {
+            return split::script(&text, engine);
+        }
+        split::statement_at(&text, engine, editor.cursor())
+            .map(|range| text[range].to_owned())
+            .unwrap_or_default()
     }
 
-    fn run(&mut self, _: &RunQuery, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn run(&mut self, _: &RunQuery, window: &mut Window, cx: &mut Context<Self>) {
+        self.start(false, window, cx);
+    }
+
+    fn run_script(&mut self, _: &RunScript, window: &mut Window, cx: &mut Context<Self>) {
+        self.start(true, window, cx);
+    }
+
+    fn start(&mut self, script: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.running.is_some() {
             return;
         }
-        let session = match self.session(cx) {
-            Ok(session) => session,
+        let (id, session) = match self.session(cx) {
+            Ok(found) => found,
             Err(message) => {
                 window.push_notification(Notification::warning(message), cx);
                 return;
             }
         };
-        let sql = self.sql(cx);
+        let Some(engine) = self.data_sources.read(cx).get(id).map(|c| c.engine) else {
+            return;
+        };
+        self.engine = engine;
+        let sql = self.sql(engine, script, cx);
         if sql.trim().is_empty() {
             return;
         }
+        self.source = Some(id);
 
         self.results.clear();
         self.output.clear();
         self.pane = Pane::Output;
         self.summary = None;
+        self.pending_export = None;
+        self.filter
+            .update(cx, |filter, cx| filter.set_value("", window, cx));
+        let run_sql = sql.clone();
         let reader = cx.spawn_in(window, async move |this, cx| {
             let started = session::join(runtime::spawn(async move { session.execute(sql).await }));
             let mut query = match started.await {
@@ -270,15 +430,22 @@ impl QueryConsole {
         });
         self.running = Some(Running {
             started: Instant::now(),
+            ran_at: SystemTime::now(),
+            source: id,
+            sql: run_sql,
+            rows: 0,
+            error: None,
             _reader: reader,
         });
         cx.notify();
     }
 
-    fn cancel(&mut self, cx: &mut Context<Self>) {
-        let Some(running) = self.running.take() else {
+    pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
+        let Some(mut running) = self.running.take() else {
             return;
         };
+        running.error = Some("cancelled".into());
+        self.record(&running, cx);
         drop(running);
         // Only the last result can still be streaming.
         let streaming = self
@@ -296,6 +463,9 @@ impl QueryConsole {
         }
         self.stop_grid(cx);
         self.log(message, false);
+        if self.pending_export.take().is_some() {
+            self.log("Export cancelled".into(), true);
+        }
         self.summary = Some("cancelled".into());
         cx.notify();
     }
@@ -308,7 +478,7 @@ impl QueryConsole {
         cx: &mut Context<Self>,
     ) {
         let table = cx.new(|cx| {
-            let mut table = TableState::new(ResultSet::empty(), window, cx);
+            let mut table = TableState::new(ResultSet::empty(self.engine), window, cx);
             table.delegate_mut().start(meta, pacer);
             table.refresh(cx);
             table
@@ -351,10 +521,20 @@ impl QueryConsole {
             (None, Some(affected)) => format!("{} affected", count(affected as usize, "row")),
             (None, None) => "OK".to_string(),
         };
+        if let Some(running) = &mut self.running {
+            running.rows += match rows {
+                Some(rows) => (rows + skipped) as u64,
+                None => rows_affected.unwrap_or(0),
+            };
+        }
         let line = format!("{what} · {}", duration(elapsed));
         if rows.is_some() {
             self.set_last_summary(line.clone());
             self.stop_grid(cx);
+            let last = self.results.len().wrapping_sub(1);
+            if let Some((_, path)) = self.pending_export.take_if(|(ix, _)| *ix == last) {
+                self.write_export(last, path, cx);
+            }
         }
         self.log(line, false);
         cx.notify();
@@ -362,6 +542,9 @@ impl QueryConsole {
 
     fn fail(&mut self, err: AppError, window: &mut Window, cx: &mut Context<Self>) {
         let message = err.to_string();
+        if let Some(running) = &mut self.running {
+            running.error = Some(message.clone());
+        }
         self.log(message.clone(), true);
         self.pane = Pane::Output;
         window.push_notification(Notification::error(message), cx);
@@ -371,6 +554,7 @@ impl QueryConsole {
     /// The execution ended (all statements done, or an error).
     fn finish(&mut self, cx: &mut Context<Self>) {
         if let Some(running) = self.running.take() {
+            self.record(&running, cx);
             self.stop_grid(cx);
             let time = duration(running.started.elapsed());
             self.summary = Some(
@@ -382,6 +566,44 @@ impl QueryConsole {
             );
         }
         cx.notify();
+    }
+
+    fn record(&self, running: &Running, cx: &mut Context<Self>) {
+        let entry = HistoryEntry {
+            connection: running.source,
+            sql: running.sql.clone(),
+            ran_at: running.ran_at,
+            duration: running.started.elapsed(),
+            rows: running.rows,
+            error: running.error.clone(),
+        };
+        self.data_sources
+            .update(cx, |ds, _| ds.record_history(&entry));
+    }
+
+    /// Opens the history; picking an entry puts its SQL in this console.
+    fn show_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let console = cx.entity().downgrade();
+        let panel = cx.new(|cx| {
+            HistoryPanel::new(
+                self.data_sources.clone(),
+                Rc::new(move |sql: String, window: &mut Window, cx: &mut App| {
+                    console
+                        .update(cx, |console, cx| {
+                            console.insert_sql(&sql, false, window, cx)
+                        })
+                        .ok();
+                }),
+                window,
+                cx,
+            )
+        });
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog
+                .title("Query history")
+                .w(px(720.))
+                .child(panel.clone())
+        });
     }
 
     /// Ends streaming into the last result, the only one that can stream.
@@ -420,9 +642,7 @@ impl QueryConsole {
         let tool = |id: &'static str| Button::new(id).custom(theme::band_button(cx)).small();
         let running = self.is_running();
         let source = self
-            .explorer
-            .read(cx)
-            .selected_connection(cx)
+            .source(cx)
             .and_then(|id| self.data_sources.read(cx).get(id))
             .map(|c| c.display_name());
 
@@ -439,9 +659,18 @@ impl QueryConsole {
                     .small()
                     .icon(Icon::new(IconName::Play))
                     .label("Run")
-                    .tooltip("Execute (⌘↩)")
+                    .tooltip("Run the statement at the caret, or the selection (⌘↩)")
                     .disabled(running)
                     .on_click(cx.listener(|this, _, window, cx| this.run(&RunQuery, window, cx))),
+            )
+            .child(
+                tool("run-script")
+                    .icon(Icon::new(Lucide::ListVideo))
+                    .tooltip("Run the whole script (⇧⌘↩)")
+                    .band_disabled(running)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.run_script(&RunScript, window, cx)),
+                    ),
             )
             .child(
                 tool("cancel")
@@ -455,7 +684,7 @@ impl QueryConsole {
                 tool("history")
                     .icon(Icon::new(Lucide::Timer))
                     .tooltip("Query history")
-                    .on_click(coming_later("Query history")),
+                    .on_click(cx.listener(|this, _, window, cx| this.show_history(window, cx))),
             )
             .child(
                 tool("tx")
@@ -509,6 +738,10 @@ impl QueryConsole {
                     this.pane = pane;
                     cx.notify();
                 }))
+        };
+        let result_ix = match self.pane {
+            Pane::Result(ix) if ix < self.results.len() => Some(ix),
+            _ => None,
         };
         let summary = match self.pane {
             Pane::Result(ix) => self.results.get(ix).map(|tab| tab.summary.clone()),
@@ -616,7 +849,30 @@ impl QueryConsole {
                             .flex_none()
                             .text_color(theme.muted_foreground)
                             .child(s)
-                    })),
+                    }))
+                    .when_some(result_ix, |this, ix| {
+                        this.child(div().w(px(160.)).child(Input::new(&self.filter).xsmall()))
+                            .child(
+                                Button::new("copy-result")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(IconName::Copy))
+                                    .tooltip("Copy the shown rows as TSV (right-click a row for more formats)")
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.copy_result(ix, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("export-result")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(Lucide::Download))
+                                    .tooltip("Export the shown rows to CSV…")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.export_result(ix, window, cx)
+                                    })),
+                            )
+                    }),
             )
             .child(body)
     }
@@ -627,6 +883,7 @@ impl Render for QueryConsole {
         v_flex()
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::run))
+            .on_action(cx.listener(Self::run_script))
             .size_full()
             .child(self.render_toolbar(cx))
             .child(

@@ -1,14 +1,17 @@
 mod assets;
+mod completion;
 mod connection_form;
 mod console;
 mod data_sources;
 mod diagram;
 mod erd_layout;
 mod explorer;
+mod history;
 mod memory;
 mod results;
 mod runtime;
 mod session;
+mod structure;
 mod table_menu;
 mod theme;
 #[cfg(test)]
@@ -25,6 +28,7 @@ fn main() {
             gpui_kit::init(cx);
             theme::apply(cx);
             console::init(cx);
+            workspace::init(cx);
 
             let bounds = Bounds::centered(None, size(px(1360.), px(860.)), cx);
             let options = WindowOptions {

@@ -12,6 +12,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use savoia_core::sql_text::{quote_ident, quote_ident_if_needed};
 use savoia_core::{ConnectionId, Engine};
 
 /// Rows "Open data" loads.
@@ -92,8 +93,8 @@ impl ObjectRef {
     pub fn qualified_sql(&self) -> String {
         format!(
             "{}.{}",
-            quote(self.engine, self.container()),
-            quote(self.engine, &self.name)
+            quote_ident(self.engine, self.container()),
+            quote_ident(self.engine, &self.name)
         )
     }
 
@@ -101,8 +102,8 @@ impl ObjectRef {
     pub fn qualified_name(&self) -> String {
         format!(
             "{}.{}",
-            quote_if_needed(self.engine, self.container()),
-            quote_if_needed(self.engine, &self.name)
+            quote_ident_if_needed(self.engine, self.container()),
+            quote_ident_if_needed(self.engine, &self.name)
         )
     }
 
@@ -130,43 +131,12 @@ impl ObjectRef {
     }
 }
 
-fn quote(engine: Engine, ident: &str) -> String {
-    match engine {
-        Engine::Postgres => format!("\"{}\"", ident.replace('"', "\"\"")),
-        Engine::Mysql => format!("`{}`", ident.replace('`', "``")),
-    }
-}
-
-fn quote_if_needed(engine: Engine, ident: &str) -> String {
-    let mut chars = ident.chars();
-    let plain = match engine {
-        // Unquoted Postgres identifiers fold to lower case.
-        Engine::Postgres => {
-            chars
-                .next()
-                .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
-                && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        }
-        Engine::Mysql => {
-            !ident.is_empty()
-                && !ident.chars().all(|c| c.is_ascii_digit())
-                && ident
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
-        }
-    };
-    if plain {
-        ident.to_owned()
-    } else {
-        quote(engine, ident)
-    }
-}
-
 /// What the menu asks the explorer to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableAction {
     OpenData,
     ShowDiagram,
+    Structure,
     NewSelect,
     CopyName,
     CopyQualifiedName,
@@ -235,7 +205,13 @@ pub fn build(
             Tone::Normal,
             TableAction::ShowDiagram,
         ))
-        .item(later(Icon::new(Lucide::TableProperties), "Structure", "M2"))
+        .item(item(
+            Icon::new(Lucide::TableProperties),
+            "Structure".into(),
+            Some("columns, keys, DDL".into()),
+            Tone::Normal,
+            TableAction::Structure,
+        ))
         .separator()
         .item(item(
             Icon::new(Lucide::SquarePen),
