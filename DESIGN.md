@@ -177,15 +177,32 @@ Deep brand hues on a green-cast graphite, with bright status hues that belong to
 - **Ink** (`ink`), **Header Ink** (`ink-header`), **Muted Ink** (`ink-muted`): body text, grid column headers, secondary text and empty states.
 - **Band Ink** (`band-ink`), **Band Ink Muted** (`band-ink-muted`), **Band Ink Disabled** (`band-ink-disabled`), **Band Rule** (`band-rule`): paper-white text, secondary text, disabled controls and hairline separators on an Ivrea band.
 
+### Light appearance (Olivetti paper)
+The light theme swaps graphite for warm paper and keeps the brand: Ivrea bands, band ink, Savoy-blue Run and the blueprint board look the same in both. `theme.rs` holds the two palettes (`DARK`, `LIGHT`), and Settings, or the OS under *Match system*, picks one.
+
+| Role | Dark | Light |
+| --- | --- | --- |
+| Canvas | #161A17 | #F7F6F2 |
+| Panel | #1D211E | #EEEDE7 |
+| Seam | #111412 | #D6D4CB |
+| Rule | #272C28 | #E0DED6 |
+| Hover / Row hover | #2A302C / #1F2420 | #E4E2DA / #F0EFE9 |
+| Selection | #213A31 | #D3E6DC |
+| Ink / Header / Muted | #E9E6DF / #B8BDB8 / #8D938F | #1C201D / #48504A / #646B66 |
+| Line (focus, caret, active) | #5FB088 | #1B7650 |
+| Teal / Vermilion / Saffron / Violet | #3DB9AE / #F2713C / #E5B54A / #9B8CE8 | #0A7870 / #B8441A / #836109 / #5E4DB8 |
+
+On paper, the status hues and the line green are darkened to hold 4.5:1 on canvas and panel, and ink on a status fill turns white. Views take green lines from `theme.ring` rather than a constant, so they follow the appearance.
+
 ### Connection tags
 User-chosen connection colors (`tag-red` through `tag-pink`) mark which database you are touching. They tint the data-source icon in the explorer, the console tab icon, and the connection form swatch. They are data, not brand: never reuse a tag value for chrome.
 
 ### Named Rules
-**The Run-Only Blue Rule.** Savoy blue fills Run and nothing else in the window. The title-bar mark omits the app icon's blue dot to keep it that way.
+**The Run-Only Blue Rule.** Savoy blue fills Run and nothing else in the window. The title-bar mark keeps a plain database glyph on green to keep it that way.
 
-**The Red Means Danger Rule.** Brand surfaces never use red. Errors and failures use vermilion-orange, and no status hue reuses Ivrea green or Savoy blue.
+**The Red Means Danger Rule.** Brand surfaces never use red. Errors and failures use vermilion-orange, and no status hue reuses Ivrea green or Savoy blue. The one exception is heraldry: the app icon's Savoy shield is red with a white cross ([ADR](docs/adr/202610100830-use-the-crowned-savoy-shield-as-the-app-icon.md)), and that red never enters the UI.
 
-**The Lifted Line Rule.** Deep Ivrea green is a fill, never a 1px stroke. Any green line on graphite uses Ivrea Line.
+**The Lifted Line Rule.** Deep Ivrea green is a fill, never a 1px stroke. Any green line uses the appearance's line green (`theme.ring`): Ivrea Line on graphite, its darker step on paper.
 
 **The Band Ink Rule.** Anything on a band uses band ink. Disabled controls on a band take Band Ink Disabled, never the toolkit's graphite-tuned disabled ink, which vanishes on green.
 
@@ -224,7 +241,7 @@ Docked surfaces are flat. Depth comes from tonal steps (canvas, panel, seam) and
 
 ## Shapes
 
-Bars, bands, strips and panels are square. Controls round to 6px, dialogs to 8px. The title-bar mark is a 16px tile at 4px. Status dots and connection swatches are full circles. The app icon is a paper-white database cylinder on an Ivrea-green tile, with a Savoy-blue dot.
+Bars, bands, strips and panels are square. Controls round to 6px, dialogs to 8px. The title-bar mark is a 16px tile at 4px. Status dots and connection swatches are full circles. The app icon is the crowned Savoy shield (white cross on red, Savoy-blue border, gold crown) on an Ivrea-green tile.
 
 ### Named Rules
 **The Square Bars Rule.** Structural bars never round; radius belongs to the controls placed on them.
@@ -262,7 +279,7 @@ Flat and quiet. Color does the work; there is no gloss.
 - Menu actions that produce SQL add it after the console's text and select it, so a run takes just that statement and the user's own SQL stays.
 
 ### SQL Editor
-- Editor Mono on Graphite Canvas. The syntax palette overrides GPUI Kit's default dark highlight theme in `theme.rs` (`SYNTAX`) so no token is blue, following the Run-Only Blue Rule.
+- Editor Mono on Graphite Canvas. The syntax palette overrides GPUI Kit's default dark highlight theme in `theme.rs` (`DARK_SYNTAX`) so no token is blue, following the Run-Only Blue Rule. The light theme has its own set (`LIGHT_SYNTAX`) with the same roles in darker inks.
 - **Keywords** in a lifted Ivrea green (#6DBE95). **Strings** in sand (#D8BC8C), moved off green so they stay distinct from keywords. **Numbers, constants and booleans** in dusty rose (#D69AAE). **Types** in lilac (#C3A9D9). **Functions** in pale sage (#B9CFC2). Comments stay the toolkit's muted grey.
 
 ## Do's and Don'ts

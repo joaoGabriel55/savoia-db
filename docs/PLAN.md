@@ -90,7 +90,7 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 
 ### M5: Polish and release (weeks 12–13)
 - Command palette, keybindings, settings, light theme.
-- Packaging with `cargo-packager` (or similar; needs an ADR): dmg, msi/nsis, AppImage/deb/rpm. Code signing (macOS notarization, Windows signing), auto-update.
+- Packaging with `cargo-packager` ([ADR](./adr/202610100804-package-with-cargo-packager-and-update-from-github-releases.md)): dmg, msi/nsis, AppImage/deb/rpm. Code signing (macOS notarization, Windows signing), auto-update.
 - Crash/error reporting (opt-in), docs site, v0.1 release.
 
 ## 4. Testing strategy
@@ -114,5 +114,5 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 ## 6. Open decisions (need ADRs)
 
 - ~~Bundle pg_dump/mysqldump binaries per OS, or only detect them?~~ Detect only: see [the ADR](./adr/202610092308-detect-installed-dump-tools-instead-of-bundling-them.md).
-- Packaging/updater tool now that Tauri is gone.
-- License, and update/distribution channel.
+- ~~Packaging/updater tool now that Tauri is gone.~~ cargo-packager and its updater: see [the ADR](./adr/202610100804-package-with-cargo-packager-and-update-from-github-releases.md).
+- ~~License, and update/distribution channel.~~ MIT OR Apache-2.0, GitHub Releases: see [the ADR](./adr/202610100805-license-under-mit-or-apache-2-and-distribute-through-github-releases.md).

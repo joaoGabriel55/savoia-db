@@ -31,7 +31,7 @@ fn mount(
 ) -> (Entity<DataSources>, Entity<ConnectionForm>, AnyWindowHandle) {
     cx.update(|cx| {
         gpui_kit::init(cx);
-        crate::theme::apply(cx);
+        crate::theme::apply(crate::theme::Appearance::Dark, cx);
     });
     let ds = cx.new(|_| {
         DataSources::with_stores(
@@ -822,7 +822,7 @@ async fn postgres_console_tabs_are_independent(cx: &mut TestAppContext) {
     let session = session_of(cx, &ds).expect("connected");
     cx.update(|cx| {
         crate::console::init(cx);
-        crate::workspace::init(cx);
+        crate::commands::init(cx);
     });
     let (window, workspace) = cx
         .update(|cx| {
@@ -1955,4 +1955,89 @@ async fn mysql_wizard_exports_a_table(cx: &mut TestAppContext) {
     let dump = std::fs::read_to_string(&out).unwrap();
     assert!(dump.contains("it_wizard_people"), "{dump}");
     assert!(!dump.contains("it_parts"), "only the picked table: {dump}");
+}
+
+fn mount_workspace(
+    cx: &mut TestAppContext,
+) -> (Entity<DataSources>, Entity<Workspace>, AnyWindowHandle) {
+    let (ds, _, _) = mount(cx);
+    cx.update(|cx| {
+        crate::console::init(cx);
+        crate::commands::init(cx);
+    });
+    let (window, workspace) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| Workspace::with_data_sources(ds.clone(), window, cx))
+            })
+        })
+        .expect("window");
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    (ds, workspace, window)
+}
+
+/// The palette runs the chosen command on the workspace, once.
+#[gpui_kit::test]
+async fn the_palette_runs_a_command_once(cx: &mut TestAppContext) {
+    let (_, workspace, window) = mount_workspace(cx);
+    let consoles = |cx: &mut TestAppContext| workspace.read_with(cx, |w, _| w.consoles().count());
+    assert_eq!(consoles(cx), 1);
+
+    // Keys only reach elements of a drawn frame.
+    let frame = |cx: &mut TestAppContext| {
+        cx.run_until_parked();
+        cx.update_window(window, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+    };
+    cx.simulate_keystrokes(window, "secondary-shift-p");
+    frame(cx);
+    cx.simulate_input(window, "new console");
+    frame(cx);
+    cx.simulate_keystrokes(window, "enter");
+    frame(cx);
+
+    assert_eq!(consoles(cx), 2);
+}
+
+/// ⌘, opens Settings, and a second ⌘, brings the same tab forward.
+#[gpui_kit::test]
+async fn settings_opens_once(cx: &mut TestAppContext) {
+    let (_, workspace, window) = mount_workspace(cx);
+    cx.simulate_keystrokes(window, "secondary-,");
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    cx.simulate_keystrokes(window, "secondary-,");
+    cx.run_until_parked();
+    assert_eq!(workspace.read_with(cx, |w, _| w.settings_tabs()), 1);
+}
+
+/// Theme commands switch the palette at once and are remembered.
+#[gpui_kit::test]
+async fn theme_commands_switch_and_persist(cx: &mut TestAppContext) {
+    use gpui_kit::component::ActiveTheme as _;
+
+    let (ds, _, window) = mount_workspace(cx);
+    let dispatch = |cx: &mut TestAppContext, action: Box<dyn gpui_kit::Action>| {
+        cx.update_window(window, |_, window, cx| window.dispatch_action(action, cx))
+            .unwrap();
+        cx.run_until_parked();
+    };
+
+    dispatch(cx, Box::new(crate::commands::UseLightAppearance));
+    assert!(cx.update(|cx| !cx.theme().is_dark()));
+    assert_eq!(
+        ds.read_with(cx, |ds, _| ds.setting("ui.appearance"))
+            .as_deref(),
+        Some("light")
+    );
+
+    dispatch(cx, Box::new(crate::commands::UseDarkAppearance));
+    assert!(cx.update(|cx| cx.theme().is_dark()));
+    assert_eq!(
+        ds.read_with(cx, |ds, _| ds.setting("ui.appearance"))
+            .as_deref(),
+        Some("dark")
+    );
 }

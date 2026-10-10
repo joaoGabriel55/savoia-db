@@ -27,9 +27,18 @@ memory-stats = "1.2"
 # Types of gpui-kit's editor completion API; keep in step with gpui-base.
 lsp-types = "=0.97.0"
 anyhow = "1"
+# Auto-update from GitHub Releases; see the packaging ADR.
+cargo-packager-updater = "0.2.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Smaller installers (budget: 15 MB). Symbol names stay so crash
+# backtraces still name functions.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"

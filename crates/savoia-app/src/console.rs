@@ -728,7 +728,7 @@ impl QueryConsole {
                 .cursor_pointer()
                 .border_b_2()
                 .border_color(if selected {
-                    theme::c(theme::IVREA_LINE)
+                    cx.theme().ring
                 } else {
                     transparent_black()
                 })

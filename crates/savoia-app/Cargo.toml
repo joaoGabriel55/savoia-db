@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+cargo-packager-updater.workspace = true
 gpui-kit.workspace = true
 lsp-types.workspace = true
 memory-stats.workspace = true
@@ -22,6 +23,7 @@ savoia-transfer.workspace = true
 savoia-tunnel.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
@@ -29,3 +31,46 @@ gpui-kit = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
+
+# Installers, built by `cargo packager --release` from this folder. See
+# docs/RELEASING.md and the packaging ADR.
+[package.metadata.packager]
+product-name = "Savoia Studio"
+identifier = "com.savoia.studio"
+description = "A native database client for PostgreSQL and MySQL."
+homepage = "https://github.com/joaoGabriel55/savoia-studio"
+authors = ["Gabriel Quaresma"]
+publisher = "Savoia Studio"
+copyright = "Copyright © 2026 the Savoia Studio authors"
+category = "DeveloperTool"
+license-file = "../../LICENSE-MIT"
+before-packaging-command = "cargo build -p savoia-app --release"
+out-dir = "../../target/packages"
+binaries-dir = "../../target/release"
+binaries = [{ path = "savoia-studio", main = true }]
+icons = [
+  "../../assets/icons/icon-32.png",
+  "../../assets/icons/icon-128.png",
+  "../../assets/icons/icon-256.png",
+  "../../assets/icons/icon-512.png",
+  "../../assets/icons/icon.icns",
+]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+
+[package.metadata.packager.deb]
+section = "database"
+
+[package.metadata.packager.nsis]
+installer-mode = "currentUser"
+
+# RPM comes from cargo-generate-rpm; cargo-packager has no rpm format.
+[package.metadata.generate-rpm]
+name = "savoia-studio"
+summary = "A native database client for PostgreSQL and MySQL"
+assets = [
+  { source = "target/release/savoia-studio", dest = "/usr/bin/savoia-studio", mode = "755" },
+  { source = "assets/icons/icon-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/savoia-studio.png", mode = "644" },
+  { source = "crates/savoia-app/savoia-studio.desktop", dest = "/usr/share/applications/savoia-studio.desktop", mode = "644" },
+]

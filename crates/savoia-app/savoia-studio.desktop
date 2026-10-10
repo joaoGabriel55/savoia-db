@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Savoia Studio
+Comment=A native database client for PostgreSQL and MySQL
+Exec=savoia-studio
+Icon=savoia-studio
+Categories=Development;Database;
+Terminal=false

@@ -3,7 +3,7 @@
 The work still missing from [PLAN.md](./PLAN.md), split into tasks small enough to ship one per PR.
 Each task lists where it lives, what "done" means, and a rough estimate for one developer.
 
-Status as of 2026-10-09: M0–M4 are done. M5 has not started.
+Status as of 2026-10-10: M0–M4 are done. M5 is done except signing secrets and the v0.1.0 tag.
 
 Legend: **[ ]** open · **[~]** partly done · **[x]** done
 
@@ -55,24 +55,18 @@ Lives in the `savoia-transfer` crate. Tools are detected, not bundled: see the [
 | 4.6 | [x] Dump and import through SSH tunnels. |
 | 4.7 | [x] Round-trip test: dump → restore, compare schema and row checksums. |
 
-## Now: M5 (Polish and release), about 2 weeks
+## Now: M5 (Polish and release)
+
+Release mechanics are in [RELEASING.md](./RELEASING.md). Decisions: [packaging and updates](./adr/202610100804-package-with-cargo-packager-and-update-from-github-releases.md), [license and distribution](./adr/202610100805-license-under-mit-or-apache-2-and-distribute-through-github-releases.md), [crash reports](./adr/202610100806-report-crashes-as-user-reviewed-github-issues.md) (Proposed).
 
 | # | Task |
 |---|------|
-| 5.1 | [ ] Command palette and keybindings |
-| 5.2 | [ ] Settings screen |
-| 5.3 | [ ] Light theme (tokens in `theme.rs`) |
-| 5.4 | [ ] Packaging: dmg, msi/nsis, AppImage/deb/rpm; macOS notarization and Windows signing; auto-update |
-| 5.5 | [ ] Opt-in crash reporting, docs site, v0.1 release |
-
-## Decisions that block delivery
-
-These need an ADR before the task that depends on them starts.
-
-| Decision | Blocks |
-|----------|--------|
-| Packaging and updater tool (Tauri is gone) | 5.4 |
-| License and distribution channel | 5.5 |
+| 5.1 | [x] Command palette (⌘⇧P) over every app command, with keybindings for tabs, settings and quit, and a macOS menu bar (`commands.rs`). |
+| 5.2 | [x] Settings tab (⌘,): appearance, dump tools folder, updates, crash reports, keyboard list, about (`settings.rs`, `settings_view.rs`). |
+| 5.3 | [x] Light theme: Olivetti-paper palette beside graphite in `theme.rs`; Match system follows the OS live. |
+| 5.4 | [~] Packaging and auto-update done: cargo-packager config, release workflow, signed `latest.json`, in-app updater; dmg is 12.9 MB. Left: Apple and Windows signing secrets, and a live update test against a published release. |
+| 5.5 | [~] Opt-in crash reports, docs site (`docs/site`, mdBook on Pages), license files and CHANGELOG are done. Left: tag and publish v0.1.0. |
+| 5.6 | [x] Ko-fi button at the top of README.md, in the status bar and in Settings › About. |
 
 ## Release checks
 
@@ -81,4 +75,4 @@ Budgets from PLAN.md, measured before v0.1:
 - [ ] Cold start under 1 s
 - [x] Idle RAM under 150 MB (see [benchmarks/memory.md](./benchmarks/memory.md))
 - [ ] Scrolling 1M-row results at 60 fps
-- [ ] Installer under 15 MB
+- [x] Installer under 15 MB (12.9 MB dmg, Apple silicon, 2026-10-10)

@@ -56,7 +56,7 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Follow a DataGrip-style IDE layout with Savoia branding](./202610091043-follow-a-datagrip-style-ide-layout-with-savoia-branding.md) | Superseded by [Brand Savoia with Olivetti-style green fields and a red Run action](./202610091120-brand-savoia-with-olivetti-style-green-fields-and-a-red-run-action.md) |
 | 2026-10-09 | [Verify SSH host keys against known_hosts, with explicit trust](./202610091108-verify-ssh-host-keys-against-known-hosts-with-explicit-trust.md) | Accepted |
 | 2026-10-09 | [Brand Savoia with Olivetti-style green fields and a red Run action](./202610091120-brand-savoia-with-olivetti-style-green-fields-and-a-red-run-action.md) | Superseded by [Use Savoy blue, not red, as the brand accent](./202610091125-use-savoy-blue-not-red-as-the-brand-accent.md) |
-| 2026-10-09 | [Use Savoy blue, not red, as the brand accent](./202610091125-use-savoy-blue-not-red-as-the-brand-accent.md) | Accepted |
+| 2026-10-09 | [Use Savoy blue, not red, as the brand accent](./202610091125-use-savoy-blue-not-red-as-the-brand-accent.md) | Superseded by [Use the crowned Savoy shield as the app icon](./202610100830-use-the-crowned-savoy-shield-as-the-app-icon.md) |
 | 2026-10-09 | [Stream query results as server-rendered text pages](./202610091303-stream-query-results-as-server-rendered-text-pages.md) | Accepted |
 | 2026-10-09 | [Serialize all work on one connection per session](./202610091309-serialize-all-work-on-one-connection-per-session.md) | Accepted |
 | 2026-10-09 | [Draw ER diagrams natively with a built-in layered layout](./202610091437-draw-er-diagrams-natively-with-a-built-in-layered-layout.md) | Proposed |
@@ -69,3 +69,7 @@ Regenerate this table from the files rather than editing it by hand:
 | 2026-10-09 | [Write data edits as generated SQL in one previewed transaction](./202610091908-write-data-edits-as-generated-sql-in-one-previewed-transaction.md) | Accepted |
 | 2026-10-09 | [Detect installed dump tools instead of bundling them](./202610092308-detect-installed-dump-tools-instead-of-bundling-them.md) | Accepted |
 | 2026-10-09 | [Write built-in dumps as plain SQL from one snapshot](./202610092329-write-built-in-dumps-as-plain-sql-from-one-snapshot.md) | Proposed |
+| 2026-10-10 | [Package with cargo-packager and update from GitHub Releases](./202610100804-package-with-cargo-packager-and-update-from-github-releases.md) | Accepted |
+| 2026-10-10 | [License under MIT or Apache-2.0 and distribute through GitHub Releases](./202610100805-license-under-mit-or-apache-2-and-distribute-through-github-releases.md) | Accepted |
+| 2026-10-10 | [Report crashes as user-reviewed GitHub issues](./202610100806-report-crashes-as-user-reviewed-github-issues.md) | Proposed |
+| 2026-10-10 | [Use the crowned Savoy shield as the app icon](./202610100830-use-the-crowned-savoy-shield-as-the-app-icon.md) | Accepted |

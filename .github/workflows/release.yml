@@ -1,0 +1,101 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds every installer, signs what can be signed,
+# and publishes them with latest.json (the updater manifest) to a draft
+# GitHub Release. Review the draft, then publish it. See docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-aarch64, os: macos-14, formats: "app,dmg", arch: aarch64 }
+          - { name: macos-x86_64, os: macos-13, formats: "app,dmg", arch: x86_64 }
+          - { name: windows-x86_64, os: windows-latest, formats: "nsis,wix", arch: x86_64 }
+          - { name: linux-x86_64, os: ubuntu-22.04, formats: "deb,appimage", arch: x86_64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      # Baked into the binary: without it the build can't update itself.
+      SAVOIA_UPDATER_PUBKEY: ${{ vars.SAVOIA_UPDATER_PUBKEY }}
+      # Signs every package for the updater (minisign).
+      CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+      CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+      # macOS code signing and notarization; skipped while unset.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          cargo install cargo-packager --version 0.11.8 --locked
+          if [ "$RUNNER_OS" = Linux ]; then cargo install cargo-generate-rpm --version 0.16.1 --locked; fi
+      - name: Check the tag matches the crate version
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="savoia-app"))')
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != crate $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Package
+        working-directory: crates/savoia-app
+        shell: bash
+        run: cargo packager --release --formats ${{ matrix.formats }}
+      - name: RPM
+        if: runner.os == 'Linux'
+        run: cargo generate-rpm -p crates/savoia-app -o target/packages/
+      - name: Name the assets
+        shell: bash
+        working-directory: target/packages
+        run: |
+          # GitHub turns spaces in asset names into dots; settle names here
+          # so latest.json and the uploads agree. The .app.tar.gz carries no
+          # architecture of its own.
+          for f in *.app.tar.gz *.app.tar.gz.sig; do
+            [ -e "$f" ] && mv "$f" "savoia-studio_${VERSION}_${{ matrix.arch }}${f#Savoia Studio}"
+          done
+          for f in *; do
+            [ -f "$f" ] && [ "$f" != "${f// /-}" ] && mv "$f" "$(echo "${f// /-}" | tr '[:upper:]' '[:lower:]')"
+          done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            target/packages/*.*
+            !target/packages/*.app
+
+  publish:
+    name: Draft the release
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Updater manifest
+        run: python3 scripts/release-manifest.py "${GITHUB_REF_NAME#v}" "$GITHUB_REF_NAME" dist > dist/latest.json
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag \
+            --title "Savoia Studio ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md

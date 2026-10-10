@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [Use the crowned Savoy shield as the app icon](./202610100830-use-the-crowned-savoy-shield-as-the-app-icon.md)
 
 ## Context
 

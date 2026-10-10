@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1090 300">
+  <!-- Savoia Studio wordmark; for light backgrounds. -->
+  <svg x="0" y="0" width="300" height="300" viewBox="0 0 1024 1024">
   <!-- Savoia Studio: the crowned Savoy shield (white cross on red, Savoy-blue
        border) on an Ivrea-green field, after the Kingdom of Italy's flag. -->
   <defs>
@@ -33,4 +35,7 @@
     <rect x="474" y="380" width="76" height="520" fill="#F2EFE8"/>
     <rect x="280" y="566" width="464" height="76" fill="#F2EFE8"/>
   </g>
+</svg>
+  <text x="350" y="168" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="112" font-weight="700" fill="#1C201D">Savoia Studio</text>
+  <text x="354" y="236" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="40" font-weight="400" fill="#48504A">PostgreSQL &amp; MySQL, natively</text>
 </svg>

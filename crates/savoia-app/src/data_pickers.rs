@@ -254,7 +254,7 @@ impl Render for ColumnPicker {
                         el.child(
                             Icon::new(IconName::Check)
                                 .xsmall()
-                                .text_color(theme::c(theme::IVREA_LINE)),
+                                .text_color(cx.theme().ring),
                         )
                     }))
             };
@@ -301,11 +301,7 @@ impl Render for ColumnPicker {
                                 .px_1p5()
                                 .rounded(px(4.))
                                 .border_1()
-                                .border_color(if on {
-                                    theme::c(theme::IVREA_LINE)
-                                } else {
-                                    theme.border
-                                })
+                                .border_color(if on { cx.theme().ring } else { theme.border })
                                 .when(on, |el| el.bg(theme.selection))
                                 .text_xs()
                                 .cursor_pointer()
