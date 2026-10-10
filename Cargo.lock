@@ -7181,7 +7181,7 @@ checksum = "ece8e78b2f38ec51c51f5d475df0a7187ba5111b2a28bdc761ee05b075d40a71"
 
 [[package]]
 name = "savoia-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7202,7 +7202,7 @@ dependencies = [
 
 [[package]]
 name = "savoia-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -7215,7 +7215,7 @@ dependencies = [
 
 [[package]]
 name = "savoia-mysql"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "mysql_async",
@@ -7225,7 +7225,7 @@ dependencies = [
 
 [[package]]
 name = "savoia-pg"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -7239,7 +7239,7 @@ dependencies = [
 
 [[package]]
 name = "savoia-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs 6.0.0",
  "rusqlite",
@@ -7249,7 +7249,7 @@ dependencies = [
 
 [[package]]
 name = "savoia-transfer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "flate2",
@@ -7263,7 +7263,7 @@ dependencies = [
 
 [[package]]
 name = "savoia-tunnel"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "russh",
  "savoia-core",

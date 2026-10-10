@@ -1,5 +1,11 @@
 # savoia-studio
 
+## 0.1.1
+
+### Patch Changes
+
+- [#12](https://github.com/joaoGabriel55/savoia-studio/pull/12) [`454a8c4`](https://github.com/joaoGabriel55/savoia-studio/commit/454a8c41401ca6b64a74625eb78db62a76578063) Thanks [@joaoGabriel55](https://github.com/joaoGabriel55)! - Linux packages are smaller and install on minimal systems: the `.deb` and `.rpm` drop from 21.6 MB and 16.3 MB to 14.7 MB each, and both now declare the libraries Savoia needs (xcb, xkbcommon, fontconfig, Vulkan, Wayland).
+
 ## 0.1.0
 
 The first release of Savoia Studio, a native database client for PostgreSQL and MySQL.
