@@ -88,8 +88,8 @@ jobs:
               || { echo "::error::CARGO_PACKAGER_SIGN_PRIVATE_KEY is unset; see docs/RELEASING.md"; exit 1; }
             export SAVOIA_UPDATER_PUBKEY="$(cat updater.pub)"
           fi
-          # AppImage: xz instead of the default, for the 15 MB budget.
-          export LDAI_COMP=xz
+          # AppImage stays on zstd: the mksquashfs inside appimagetool
+          # supports no other compressor (xz failed the build).
           cargo packager --release --formats ${{ matrix.formats }}
       - name: RPM, and xz for the .deb
         if: runner.os == 'Linux'

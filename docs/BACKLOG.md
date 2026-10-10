@@ -75,4 +75,4 @@ Budgets from PLAN.md, measured before v0.1:
 - [x] Cold start under 1 s: about 205 ms; the first launch of a new binary takes 1.1 s while macOS scans it (see [benchmarks/startup.md](./benchmarks/startup.md))
 - [x] Idle RAM under 150 MB (see [benchmarks/memory.md](./benchmarks/memory.md))
 - [x] Scrolling 1M-row results at 60 fps: 8.3 ms frames (120 Hz) steady, fling and jumps; one noisy run missed on jumps (see [benchmarks/scrolling.md](./benchmarks/scrolling.md))
-- [x] Installer under 15 MB (12.9 MB dmg, Apple silicon, 2026-10-10)
+- [x] Installer under 15 MB: dmg 13.4 (Apple silicon) and 14.2 (Intel), setup.exe 11.7, .deb and .rpm 14.7 (xz). Exempt: the AppImage (about 21 MB; its zstd-only tooling can't reach 15 MB even with symbols stripped) and the .msi (15.1 MB, with setup.exe as the Windows installer we point to).
