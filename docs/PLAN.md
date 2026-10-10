@@ -113,6 +113,6 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 
 ## 6. Open decisions (need ADRs)
 
-- Bundle pg_dump/mysqldump binaries per OS, or only detect them?
+- ~~Bundle pg_dump/mysqldump binaries per OS, or only detect them?~~ Detect only: see [the ADR](./adr/202610092308-detect-installed-dump-tools-instead-of-bundling-them.md).
 - Packaging/updater tool now that Tauri is gone.
 - License, and update/distribution channel.

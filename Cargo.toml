@@ -13,6 +13,7 @@ savoia-core = { path = "crates/savoia-core" }
 savoia-mysql = { path = "crates/savoia-mysql" }
 savoia-pg = { path = "crates/savoia-pg" }
 savoia-store = { path = "crates/savoia-store" }
+savoia-transfer = { path = "crates/savoia-transfer" }
 savoia-tunnel = { path = "crates/savoia-tunnel" }
 async-trait = "0.1.92"
 serde_json = "1"

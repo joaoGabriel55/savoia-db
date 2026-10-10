@@ -7138,6 +7138,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "savoia-transfer"
+version = "0.1.0"
+dependencies = [
+ "savoia-core",
+]
+
+[[package]]
 name = "savoia-tunnel"
 version = "0.1.0"
 dependencies = [
