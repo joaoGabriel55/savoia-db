@@ -194,7 +194,7 @@ pub fn build(
         .item(item(
             Icon::new(IconName::Play),
             "Open data".into(),
-            Some(format!("first {PREVIEW_ROWS} rows")),
+            Some("browse, filter, sort".into()),
             Tone::Normal,
             TableAction::OpenData,
         ))

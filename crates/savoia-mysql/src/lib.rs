@@ -79,6 +79,9 @@ fn opts(endpoint: &Endpoint, secrets: &Secrets, tls: Option<SslOpts>) -> OptsBui
         .pass(secrets.password.clone())
         .db_name(endpoint.database.clone())
         .prefer_socket(false)
+        // Rows matched, not changed: a data-view edit that rewrites a row
+        // with its own values still counts as 1.
+        .client_found_rows(true)
         .init(init)
         .ssl_opts(tls)
 }

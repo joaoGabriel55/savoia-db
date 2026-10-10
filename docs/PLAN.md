@@ -73,7 +73,7 @@ Each milestone ends with a runnable build on macOS, Windows and Linux.
 - Query history (searchable).
 - Also shipped: run the statement at the caret (statement splitter in `savoia-core`), table Structure view with DDL, password prompt on connect, browsing of other Postgres databases.
 
-### M3: Data view (weeks 7–9)
+### M3: Data view (weeks 7–9) ✅
 - No-SQL data view per table, with server-side pages, sort and filter chips.
 - Inline edits, inserts and deletes for rows with a PK/unique key: pending-change buffer → SQL preview → transaction commit/rollback ([ADR](./adr/202610091908-write-data-edits-as-generated-sql-in-one-previewed-transaction.md)).
 - Joins without join syntax: lookup columns through many-to-one FKs, summary columns and drill-down for one-to-many, an FK value picker ([ADR](./adr/202610091908-build-joins-from-foreign-key-relationship-paths.md)).

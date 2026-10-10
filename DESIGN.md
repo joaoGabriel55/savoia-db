@@ -252,7 +252,7 @@ Flat and quiet. Color does the work; there is no gloss.
 - **Status bar:** graphite panel with a muted caption: connection icon and state on the left, "SQL · UTF-8" on the right.
 
 ### Result Grid
-- Borderless data table on graphite canvas. Header in Graphite Panel with Header Ink. Rows separated by Graphite Rule, hover in Row Hover, selection in Selection, active cell outlined in Ivrea Line. A fixed 44px row-number column on the left.
+- Borderless data table on graphite canvas. Header in Graphite Panel with Header Ink. Rows separated by Graphite Rule, hover in Row Hover, selection in a translucent Ivrea Line wash (18%, close to Selection on the canvas; the toolkit paints it over the cell, so it must stay see-through), active cell outlined in Ivrea Line. A fixed 44px row-number column on the left.
 - **Empty state:** one muted body line ("Run a query (⌘↩) to see results.").
 
 ### Context Menus

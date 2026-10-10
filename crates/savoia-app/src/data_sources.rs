@@ -164,6 +164,12 @@ impl DataSources {
         }
     }
 
+    /// The data source connected most recently, if any.
+    pub fn most_recent(&self) -> Option<ConnectionId> {
+        let store = self.store.as_ref()?;
+        store.recent(1).ok()?.first().map(|c| c.config.id)
+    }
+
     pub fn connections(&self) -> &[ConnectionConfig] {
         &self.connections
     }

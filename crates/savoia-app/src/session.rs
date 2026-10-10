@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use savoia_core::{
-    AppError, AppResult, Catalog, Connection, ConnectionConfig, Driver, Endpoint, Engine,
-    QueryEvent, QueryHandle, SchemaNode, Secrets, ServerInfo, TableInfo,
+    AppError, AppResult, Catalog, ColumnMeta, Connection, ConnectionConfig, Driver, Endpoint,
+    Engine, QueryEvent, QueryHandle, Row, SchemaNode, Secrets, ServerInfo, TableInfo,
 };
 use savoia_mysql::MysqlDriver;
 use savoia_pg::PgDriver;
@@ -297,6 +297,84 @@ impl Session {
             inner: Some((handle, guard)),
         })
     }
+}
+
+impl Session {
+    /// Runs one statement to its end and returns its result set: for small,
+    /// bounded reads such as a data view's page. Runs on the I/O runtime.
+    pub async fn fetch(&self, sql: String) -> AppResult<(Arc<[ColumnMeta]>, Vec<Row>)> {
+        let mut query = self.execute(sql).await?;
+        let (mut columns, mut rows): (Arc<[ColumnMeta]>, Vec<Row>) = (Arc::new([]), Vec::new());
+        while let Some(event) = query.next().await {
+            match event? {
+                QueryEvent::Columns(meta) => columns = meta,
+                QueryEvent::Rows(page) => rows.extend(page),
+                QueryEvent::Done { .. } => {}
+            }
+        }
+        Ok((columns, rows))
+    }
+
+    /// Runs `statements` in one transaction, holding the gate throughout.
+    /// Each must affect exactly one row; otherwise, or on an error, the
+    /// transaction is rolled back and the failing statement's index is
+    /// returned with the reason. Runs on the I/O runtime.
+    pub async fn transaction(
+        &self,
+        engine: Engine,
+        statements: Vec<String>,
+    ) -> Result<(), (Option<usize>, AppError)> {
+        let _guard = self.gate.lock().await;
+        let begin = match engine {
+            Engine::Postgres => "BEGIN",
+            Engine::Mysql => "START TRANSACTION",
+        };
+        run_one(&*self.conn, begin.into())
+            .await
+            .map_err(|e| (None, e))?;
+        for (ix, sql) in statements.into_iter().enumerate() {
+            let failure = match run_one(&*self.conn, sql).await {
+                Ok(Some(1)) => None,
+                Ok(affected) => Some(AppError::query(format!(
+                    "expected to change 1 row, changed {}; the row may have been changed or \
+                     deleted since it was loaded",
+                    affected.map_or("an unknown number".into(), |n| n.to_string())
+                ))),
+                Err(err) => Some(err),
+            };
+            if let Some(err) = failure {
+                drop(run_one(&*self.conn, "ROLLBACK".into()).await);
+                return Err((Some(ix), err));
+            }
+        }
+        run_one(&*self.conn, "COMMIT".into())
+            .await
+            .map_err(|e| (None, e))?;
+        Ok(())
+    }
+
+    /// Whether `database` is the one this session's own connection is on,
+    /// where queries run. Always true on MySQL, which reaches every database.
+    pub fn runs_in(&self, database: &str, engine: Engine) -> bool {
+        engine == Engine::Mysql
+            || self
+                .catalog()
+                .database(database)
+                .is_some_and(|d| d.is_current)
+    }
+}
+
+/// Runs one statement to its end without the gate (the caller holds it),
+/// returning the rows it affected.
+async fn run_one(conn: &dyn Connection, sql: String) -> AppResult<Option<u64>> {
+    let mut handle = conn.execute(sql).await?;
+    let mut affected = None;
+    while let Some(event) = handle.next().await {
+        if let QueryEvent::Done { rows_affected, .. } = event? {
+            affected = rows_affected;
+        }
+    }
+    Ok(affected)
 }
 
 /// A query that holds its session's gate. Dropping it before the end cancels

@@ -59,6 +59,17 @@ const STATUS_VERMILION: u32 = 0xF2713C;
 const STATUS_SAFFRON: u32 = 0xE5B54A;
 const STATUS_VIOLET: u32 = 0x9B8CE8;
 
+/// Pending changes in a data view take their status hue (teal added,
+/// saffron edited, vermilion deleted) as a quiet wash under the cell, and
+/// at full strength as the mark in the row gutter.
+pub const PENDING_WASH: f32 = 0.10;
+
+/// Ink for read-only values from related tables: a step below body ink,
+/// so they read as reference rather than as editable data.
+pub fn related_ink() -> Hsla {
+    c(INK_HEADER)
+}
+
 pub fn c(hex: u32) -> Hsla {
     rgb(hex).into()
 }
@@ -86,6 +97,8 @@ fn edit(theme: &mut Theme) {
     colors.border = c(GRAPHITE_RULE);
     colors.input = c(GRAPHITE_RULE);
     colors.selection = c(SELECTION);
+    // Not left to the toolkit default, which falls outside the palette.
+    colors.muted = c(GRAPHITE_HOVER);
 
     colors.title_bar = c(GRAPHITE_PANEL);
     colors.title_bar_border = c(GRAPHITE_SEAM);
@@ -111,7 +124,10 @@ fn edit(theme: &mut Theme) {
     colors.table_head_foreground = c(INK_HEADER);
     colors.table_even = c(GRAPHITE_CANVAS);
     colors.table_hover = c(GRAPHITE_ROW_HOVER);
-    colors.table_active = c(SELECTION);
+    // GPUI Kit lays the active cell's fill *over* its content, so it must
+    // be see-through: Ivrea Line at low strength lands near Selection on
+    // the canvas while the value stays readable.
+    colors.table_active = c(IVREA_LINE).opacity(0.18);
     colors.table_active_border = c(IVREA_LINE);
     colors.table_row_border = c(GRAPHITE_RULE);
 

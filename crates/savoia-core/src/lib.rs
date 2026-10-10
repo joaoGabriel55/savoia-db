@@ -4,8 +4,10 @@
 mod catalog;
 pub mod complete;
 mod connection;
+pub mod data_query;
 pub mod ddl;
 mod driver;
+pub mod edit;
 mod engine;
 mod error;
 pub mod export;
