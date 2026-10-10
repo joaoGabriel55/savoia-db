@@ -28,12 +28,12 @@ Savoia speaks PostgreSQL and MySQL today. Support for more databases is on the w
 
 | Database | Status |
 | --- | --- |
-| PostgreSQL | Supported |
-| MySQL | Supported |
-| MariaDB | Works through a MySQL connection today; dedicated support coming |
-| SQLite | Coming soon |
-| SQL Server | Coming soon |
-| MongoDB | Coming soon |
+| <span class="engine-logo engine-postgresql" aria-hidden="true"></span>PostgreSQL | Supported |
+| <span class="engine-logo engine-mysql" aria-hidden="true"></span>MySQL | Supported |
+| <span class="engine-logo engine-mariadb" aria-hidden="true"></span>MariaDB | Works through a MySQL connection today; dedicated support coming |
+| <span class="engine-logo engine-sqlite" aria-hidden="true"></span>SQLite | Coming soon |
+| <span class="engine-logo engine-sqlserver" aria-hidden="true"></span>SQL Server | Coming soon |
+| <span class="engine-logo engine-mongodb" aria-hidden="true"></span>MongoDB | Coming soon |
 
 Want one sooner, or one that isn't listed? [Say so on GitHub](https://github.com/joaoGabriel55/savoia-studio/issues).
 

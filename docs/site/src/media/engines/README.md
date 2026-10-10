@@ -1,0 +1,1 @@
+Engine logos for the website. PostgreSQL, MySQL, MariaDB, SQLite and MongoDB come from Simple Icons 16.34.0 (CC0-1.0, https://simpleicons.org); the marks belong to their owners. SQL Server has no Simple Icons mark, so it uses Lucide's generic "database" glyph (ISC). The pages draw them through a CSS mask, so they take the text color.

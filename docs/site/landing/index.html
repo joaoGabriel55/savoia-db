@@ -259,6 +259,12 @@ h2 {
 /* Engines: what works today and what is coming */
 .engines { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: clamp(24px, 4vw, 56px); }
 .engines li { padding: 20px 0 22px; border-top: 1px solid var(--rule); }
+.engines .logo {
+  display: block; width: 36px; height: 36px; margin-bottom: 16px;
+  background: var(--band-ink);
+  -webkit-mask: var(--logo) center / contain no-repeat;
+          mask: var(--logo) center / contain no-repeat;
+}
 .engines b { display: block; font: 700 clamp(1.4rem, 2.2vw, 1.9rem)/1.1 var(--display); font-stretch: 112%; letter-spacing: -0.02em; color: var(--ink); }
 .engines .state { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; color: var(--ink-header); }
 .engines .state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--status, #3DB9AE); }
@@ -504,12 +510,12 @@ footer a:hover { text-decoration: underline; }
         <p>Savoia speaks PostgreSQL and MySQL today. Support for more engines is coming soon, and it will be free like everything else.</p>
       </div>
       <ul class="engines">
-        <li><b>PostgreSQL</b><span class="state">Supported</span></li>
-        <li><b>MySQL</b><span class="state">Supported</span></li>
-        <li class="soon"><b>MariaDB</b><span class="state">Works through MySQL today; dedicated support coming</span></li>
-        <li class="soon"><b>SQLite</b><span class="state">Coming soon</span></li>
-        <li class="soon"><b>SQL Server</b><span class="state">Coming soon</span></li>
-        <li class="soon"><b>MongoDB</b><span class="state">Coming soon</span></li>
+        <li><span class="logo" style="--logo: url(docs/media/engines/postgresql.svg)" aria-hidden="true"></span><b>PostgreSQL</b><span class="state">Supported</span></li>
+        <li><span class="logo" style="--logo: url(docs/media/engines/mysql.svg)" aria-hidden="true"></span><b>MySQL</b><span class="state">Supported</span></li>
+        <li class="soon"><span class="logo" style="--logo: url(docs/media/engines/mariadb.svg)" aria-hidden="true"></span><b>MariaDB</b><span class="state">Works through MySQL today; dedicated support coming</span></li>
+        <li class="soon"><span class="logo" style="--logo: url(docs/media/engines/sqlite.svg)" aria-hidden="true"></span><b>SQLite</b><span class="state">Coming soon</span></li>
+        <li class="soon"><span class="logo" style="--logo: url(docs/media/engines/sqlserver.svg)" aria-hidden="true"></span><b>SQL Server</b><span class="state">Coming soon</span></li>
+        <li class="soon"><span class="logo" style="--logo: url(docs/media/engines/mongodb.svg)" aria-hidden="true"></span><b>MongoDB</b><span class="state">Coming soon</span></li>
       </ul>
       <p class="engines-note">Want one sooner, or one that isn't listed? <a href="https://github.com/joaoGabriel55/savoia-studio/issues">Say so on GitHub</a>.</p>
     </div>
