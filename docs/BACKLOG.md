@@ -48,7 +48,7 @@ Lives in the `savoia-transfer` crate. Tools are detected, not bundled: see the [
 | # | Task |
 |---|------|
 | 4.1 | [x] Tool detection: find `pg_dump`/`pg_restore`/`psql`/`mysqldump`/`mysql` on PATH or a custom path; check version against the server. |
-| 4.2 | [ ] External runner: pass secrets through 0600 temp files (`PGPASSFILE`, `--defaults-extra-file`), parse progress, cancel, show the log. |
+| 4.2 | [x] External runner: pass secrets through 0600 temp files (`PGPASSFILE`, `--defaults-extra-file`), parse progress, cancel, show the log. |
 | 4.3 | [ ] Built-in exporter: DDL from the catalog plus data to `.sql`, `.sql.gz`, CSV. |
 | 4.4 | [ ] Import: SQL file runner (reuses the 2.2 splitter; handles `$$`, `DELIMITER`, comments), CSV import with column mapping. |
 | 4.5 | [ ] Wizards: objects → options → destination → progress screen. |
