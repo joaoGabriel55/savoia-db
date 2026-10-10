@@ -34,7 +34,7 @@ use savoia_core::edit::EditTarget;
 use savoia_core::{ConnectionId, Engine, TableInfo, TableKind};
 
 use crate::data_grid::{self, DataRows, GridColumn, Request, Source as RowSource};
-use crate::data_pickers::{ColumnPicker, JoinDialog, RowPicker, SummarizeDialog};
+use crate::data_pickers::{ColumnPicker, JoinDialog, PickerData, RowPicker, SummarizeDialog};
 use crate::data_sources::DataSources;
 use crate::explorer::NodeRef;
 use crate::relations::{self, Link, Tables};
@@ -80,6 +80,9 @@ pub struct DataView {
     /// Details of the tables around this one: the rest of its schema, and
     /// the tables its foreign keys reach.
     related: Tables,
+    /// Whether `related` is loading, or why it failed.
+    related_loading: bool,
+    related_error: Option<String>,
     /// Relations the user added with "Join another table…".
     custom: Vec<Hop>,
     /// Related rows the row menu opens.
@@ -129,6 +132,8 @@ impl DataView {
             filter_value,
             initial_filters: filters,
             related: Tables::new(),
+            related_loading: false,
+            related_error: None,
             custom: Vec::new(),
             links: Vec::new(),
             _load: None,
@@ -346,6 +351,7 @@ impl DataView {
                 .is_some_and(|s| self.grid_column(info, s).numeric);
             GridColumn {
                 label: String::new(),
+                origin: data_grid::Origin::Aggregate,
                 base: None,
                 numeric: match agg {
                     Agg::Count | Agg::Sum | Agg::Avg => true,
@@ -459,6 +465,11 @@ impl DataView {
         };
         GridColumn {
             label: source.label(),
+            origin: match source {
+                Source::Base(_) => data_grid::Origin::Base,
+                Source::Lookup { .. } => data_grid::Origin::Lookup,
+                Source::Summary { .. } => data_grid::Origin::Aggregate,
+            },
             base: source.base().map(str::to_owned),
             numeric,
             picks_from,
@@ -524,13 +535,20 @@ impl DataView {
             }
             Ok(tables)
         });
+        self.related_loading = true;
         self._related = Some(cx.spawn_in(window, async move |this, cx| {
             let result = session::join(io).await;
             this.update(cx, |this, cx| {
-                if let Ok(tables) = result {
-                    this.related = tables;
-                    this.refresh_links(cx);
+                this.related_loading = false;
+                match result {
+                    Ok(tables) => {
+                        this.related = tables;
+                        this.related_error = None;
+                        this.refresh_links(cx);
+                    }
+                    Err(err) => this.related_error = Some(err.to_string()),
                 }
+                cx.notify();
             })
             .ok();
         }));
@@ -585,20 +603,52 @@ impl DataView {
         self.load_page(true, cx);
     }
 
-    fn show_columns(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let State::Ready { info, query, .. } = &self.state else {
-            return;
+    /// What the column picker shows right now.
+    pub fn picker_data(&self) -> PickerData {
+        let (sections, chosen) = match &self.state {
+            State::Ready { info, query, .. } => (
+                relations::sections(&self.node.schema, info, &self.related, &self.custom),
+                query.columns.iter().cloned().collect(),
+            ),
+            _ => (Vec::new(), HashSet::new()),
         };
-        let sections = relations::sections(&self.node.schema, info, &self.related, &self.custom);
-        let chosen: HashSet<Source> = query.columns.iter().cloned().collect();
-        let view = cx.entity().downgrade();
-        let join_view = view.clone();
+        PickerData {
+            sections,
+            chosen,
+            loading: self.related_loading,
+            error: self.related_error.clone(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn open_columns(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_columns(window, cx);
+    }
+
+    fn show_columns(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.entity();
+        let toggle_view = view.downgrade();
+        let join_view = view.downgrade();
         let picker = cx.new(|cx| {
+            // Redraw when the view changes: related tables arriving, columns
+            // added or removed.
+            cx.observe(&view, |_, _, cx| cx.notify()).detach();
+            let data_view = view.downgrade();
             ColumnPicker::new(
-                sections,
-                chosen,
+                Rc::new(move |cx: &App| {
+                    data_view
+                        .upgrade()
+                        .map(|v| v.read(cx).picker_data())
+                        .unwrap_or(PickerData {
+                            sections: Vec::new(),
+                            chosen: HashSet::new(),
+                            loading: false,
+                            error: None,
+                        })
+                }),
                 Rc::new(move |source, window, cx| {
-                    view.update(cx, |v, cx| v.toggle_column(source, window, cx))
+                    toggle_view
+                        .update(cx, |v, cx| v.toggle_column(source, window, cx))
                         .ok();
                 }),
                 Rc::new(move |window, cx| {
@@ -609,7 +659,7 @@ impl DataView {
             )
         });
         window.open_dialog(cx, move |dialog, _, _| {
-            dialog.title("Columns").w(px(520.)).child(picker.clone())
+            dialog.title("Columns").w(px(720.)).child(picker.clone())
         });
     }
 
@@ -1316,19 +1366,42 @@ impl DataView {
             return None;
         }
         let theme = cx.theme().clone();
+        // What kind of changes, in the hues the grid marks them with.
+        let (edited, added, deleted) = self.grid_entity().map_or((0, 0, 0), |g| {
+            let rows = g.read(cx).delegate();
+            let edited: HashSet<usize> = rows.edits.keys().map(|(row, _)| *row).collect();
+            (edited.len(), rows.inserted.len(), rows.deleted.len())
+        });
+        let kind = |n: usize, word: &str, hue: Hsla| {
+            (n > 0).then(|| {
+                h_flex()
+                    .gap_1()
+                    .child(div().size(px(6.)).rounded_full().bg(hue))
+                    .child(format!("{n} {word}"))
+            })
+        };
         Some(
             h_flex()
+                .h(px(32.))
                 .px_2()
-                .py_1()
-                .gap_2()
-                .bg(theme.warning.opacity(0.12))
+                .gap_3()
+                .bg(theme.title_bar)
                 .border_b_1()
                 .border_color(theme.border)
                 .text_sm()
-                .child(format!(
+                .child(div().child(format!(
                     "{pending} pending change{}",
                     if pending == 1 { "" } else { "s" }
-                ))
+                )))
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .children(kind(edited, "edited", theme.warning))
+                        .children(kind(added, "added", theme.success))
+                        .children(kind(deleted, "deleted", theme.danger)),
+                )
                 .child(div().flex_1())
                 .child(
                     Button::new("review-changes")

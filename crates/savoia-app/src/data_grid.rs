@@ -7,13 +7,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::table::{Column, ColumnSort, TableDelegate, TableState};
-use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use savoia_core::Row;
+
+use crate::theme;
 use savoia_core::edit::{Change, Value};
 
 /// What the grid asks of the view.
@@ -41,10 +44,21 @@ pub enum Source {
     Loaded(usize),
 }
 
+/// Where a grid column's values come from, shown as its header icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Base,
+    /// A column of a table reached through foreign keys.
+    Lookup,
+    /// An aggregate over child rows, or a summary output.
+    Aggregate,
+}
+
 /// One data column of the grid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridColumn {
     pub label: String,
+    pub origin: Origin,
     /// The base-table column it shows, if it is one: only those edit.
     pub base: Option<String>,
     pub numeric: bool,
@@ -302,6 +316,27 @@ impl TableDelegate for DataRows {
         self.columns[col_ix].clone()
     }
 
+    fn render_th(
+        &mut self,
+        col_ix: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let label = self.columns[col_ix].name.clone();
+        let icon = match self.data.get(col_ix.wrapping_sub(1)).map(|c| c.origin) {
+            Some(Origin::Lookup) => Some(Icon::new(Lucide::Link2)),
+            Some(Origin::Aggregate) => Some(Icon::new(Lucide::Sigma)),
+            _ => None,
+        };
+        h_flex()
+            .size_full()
+            .gap_1()
+            .when_some(icon, |el, icon| {
+                el.child(icon.xsmall().text_color(cx.theme().muted_foreground))
+            })
+            .child(div().truncate().child(label))
+    }
+
     fn render_td(
         &mut self,
         row_ix: usize,
@@ -313,53 +348,93 @@ impl TableDelegate for DataRows {
         let muted = theme.muted_foreground;
         let source = self.source(row_ix);
         let deleted = matches!(source, Source::Loaded(i) if self.deleted.contains(&i));
-        let related = col_ix > 0 && self.data[col_ix - 1].base.is_none();
-        let tint = match source {
-            Source::New(_) => Some(theme.success.opacity(0.14)),
-            _ if deleted => Some(theme.danger.opacity(0.14)),
-            Source::Loaded(i) if col_ix > 0 && self.edits.contains_key(&(i, col_ix - 1)) => {
-                Some(theme.warning.opacity(0.2))
-            }
-            _ if related => Some(theme.muted.opacity(0.5)),
-            _ => None,
-        };
-        let cell = h_flex()
-            .size_full()
-            .font_family("monospace")
-            .text_sm()
-            .when_some(tint, |c, tint| c.bg(tint))
-            .when(deleted, |c| c.line_through());
+        let cell = h_flex().size_full().font_family("monospace").text_sm();
+
+        // The gutter carries the row's state: a mark in its status hue.
         if col_ix == 0 {
-            let label = match source {
-                Source::New(_) => "new".to_string(),
-                Source::Loaded(i) => (i + 1).to_string(),
+            let edited = matches!(source, Source::Loaded(i)
+                if self.edits.keys().any(|(row, _)| *row == i));
+            let mark = match source {
+                Source::New(_) => {
+                    Some(Icon::new(IconName::Plus).xsmall().text_color(theme.success))
+                }
+                _ if deleted => Some(Icon::new(IconName::Minus).xsmall().text_color(theme.danger)),
+                _ => None,
+            };
+            let number = match source {
+                Source::New(_) => None,
+                Source::Loaded(i) => Some((i + 1).to_string()),
             };
             return cell
                 .justify_end()
+                .gap_1p5()
                 .text_color(muted)
-                .child(label)
+                .when(edited && !deleted, |el| {
+                    el.child(div().size(px(6.)).rounded_full().bg(theme.warning))
+                })
+                .children(mark)
+                .children(number)
                 .into_any_element();
         }
+
         let col = col_ix - 1;
+        let column = &self.data[col];
         if let Some((_, _, input)) = self
             .editing
             .as_ref()
             .filter(|(r, c, _)| (*r, *c) == (row_ix, col))
         {
-            return Input::new(input).xsmall().into_any_element();
+            // Flush with the cell, outlined like the active cell.
+            return h_flex()
+                .size_full()
+                .border_1()
+                .border_color(theme::c(theme::IVREA_LINE))
+                .bg(theme.background)
+                .child(
+                    // The input sizes to its container; without a flex
+                    // parent it collapses and the text disappears.
+                    div().flex_1().min_w_0().child(
+                        Input::new(input)
+                            .appearance(false)
+                            .xsmall()
+                            .font_family("monospace"),
+                    ),
+                )
+                .into_any_element();
         }
-        let cell = cell.when(self.data[col].numeric, |c| c.justify_end());
+        let edited = matches!(source, Source::Loaded(i) if self.edits.contains_key(&(i, col)));
+        let wash = match source {
+            Source::New(_) => Some(theme.success),
+            _ if deleted => Some(theme.danger),
+            _ if edited => Some(theme.warning),
+            _ => None,
+        };
+        let ink = if deleted {
+            muted
+        } else if column.base.is_none() {
+            theme::related_ink()
+        } else {
+            theme.foreground
+        };
+        let cell = cell
+            .px_1()
+            .when_some(wash, |el, hue| el.bg(hue.opacity(theme::PENDING_WASH)))
+            .when(column.numeric, |el| el.justify_end())
+            .when(deleted, |el| el.line_through())
+            .text_color(ink);
         match self.value(row_ix, col) {
             Some(text) => cell
                 .child(SharedString::from(text.to_owned()))
                 .into_any_element(),
-            None => cell
-                .text_color(muted)
-                .child(match source {
-                    Source::New(_) if !related => "default",
-                    _ => "NULL",
-                })
-                .into_any_element(),
+            None => match source {
+                // Untouched columns of a new row take their defaults.
+                Source::New(_) if column.base.is_some() => cell
+                    .italic()
+                    .text_color(muted)
+                    .child("default")
+                    .into_any_element(),
+                _ => cell.text_color(muted).child("NULL").into_any_element(),
+            },
         }
     }
 
@@ -478,6 +553,11 @@ mod tests {
     fn column(label: &str, base: bool) -> GridColumn {
         GridColumn {
             label: label.into(),
+            origin: if base {
+                super::Origin::Base
+            } else {
+                super::Origin::Lookup
+            },
             base: base.then(|| label.into()),
             numeric: false,
             picks_from: None,

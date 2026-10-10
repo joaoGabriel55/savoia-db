@@ -33,6 +33,16 @@ cargo test --workspace
 docker compose up -d --wait        # Postgres 17 :54317 (TLS on), MySQL 8.4 :33084, SSH bastion :2222 — all savoia/savoia
 ```
 
+### Working on the UI
+
+`scripts/dev.sh` rebuilds and restarts the app whenever a source file changes, then reconnects the data source you used last. Set `SAVOIA_DEV_OPEN=schema.table` to also reopen that table's data view:
+
+```sh
+SAVOIA_DEV_OPEN=it_rel.orders scripts/dev.sh
+```
+
+It is a restart, not an in-place hot reload: GPUI has no hot-patching, so window state other than the reconnect and the data view starts fresh. A failed build leaves the running app as it was. `brew install watchexec` makes it react faster; without it the script polls once a second.
+
 ### Live tests
 
 Driver, tunnel and UI integration tests talk to the compose services. Without these variables they **return early and report as passed**, so set them when you want real coverage:

@@ -1697,3 +1697,57 @@ async fn postgres_data_view_summarizes(cx: &mut TestAppContext) {
         view.read_with(cx, |v, cx| v.rows(cx) == Some((4, false)))
     });
 }
+
+/// The column picker lists the table's relationships once they load, and
+/// draws both panes.
+#[gpui_kit::test]
+async fn postgres_column_picker_lists_relationships(cx: &mut TestAppContext) {
+    use crate::relations::Kind;
+
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        &REL_SCHEMA.replace("it_rel", "it_pick"),
+    );
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: "it_pick".into(),
+        table: Some("orders".into()),
+    };
+    let (window, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| DataView::new(ds.clone(), node, Vec::new(), window, cx))
+            })
+        })
+        .expect("window");
+    wait_until(cx, "the relationships", |cx| {
+        view.read_with(cx, |v, _| !v.picker_data().loading && v.links().len() == 2)
+    });
+    let kinds: Vec<(Kind, String)> = view.read_with(cx, |v, _| {
+        v.picker_data()
+            .sections
+            .into_iter()
+            .map(|s| (s.kind, s.title))
+            .collect()
+    });
+    assert_eq!(
+        kinds,
+        [
+            (Kind::Own, "orders".to_string()),
+            (Kind::BelongsTo, "customer".to_string()),
+            (Kind::BelongsTo, "customer › countries".to_string()),
+            (Kind::HasMany, "order_items".to_string()),
+        ]
+    );
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |v, cx| v.open_columns(window, cx));
+        window.render_frame(cx);
+    })
+    .unwrap();
+}

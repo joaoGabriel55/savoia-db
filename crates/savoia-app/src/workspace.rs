@@ -53,7 +53,60 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let data_sources = crate::data_sources::init(cx);
-        Self::with_data_sources(data_sources, window, cx)
+        let mut this = Self::with_data_sources(data_sources, window, cx);
+        this.dev_restore(window, cx);
+        this
+    }
+
+    /// For `scripts/dev.sh`, which restarts the app on every change:
+    /// `SAVOIA_DEV_RECONNECT=1` connects the last-used data source, and
+    /// `SAVOIA_DEV_OPEN=schema.table` then opens that table's data view, so
+    /// each restart lands where you were.
+    fn dev_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if std::env::var_os("SAVOIA_DEV_RECONNECT").is_none() {
+            return;
+        }
+        let Some(id) = self.data_sources.read(cx).most_recent() else {
+            return;
+        };
+        self.data_sources
+            .update(cx, |ds, cx| ds.connect(id, HostKeyPolicy::KnownOnly, cx));
+        let Some(target) = std::env::var("SAVOIA_DEV_OPEN").ok() else {
+            return;
+        };
+        let Some((schema, table)) = target
+            .split_once('.')
+            .map(|(s, t)| (s.to_owned(), t.to_owned()))
+        else {
+            return;
+        };
+        let mut opened = false;
+        let subscription =
+            cx.observe_in(&self.data_sources, window, move |this, ds, window, cx| {
+                let SourceState::Connected(session) = ds.read(cx).state(id) else {
+                    return;
+                };
+                if std::mem::replace(&mut opened, true) {
+                    return;
+                }
+                let catalog = session.catalog();
+                let engine = ds.read(cx).get(id).map(|c| c.engine);
+                let database = match engine {
+                    Some(savoia_core::Engine::Mysql) => schema.clone(),
+                    _ => catalog
+                        .current()
+                        .map(|d| d.name.clone())
+                        .unwrap_or_default(),
+                };
+                let node = NodeRef {
+                    connection: id,
+                    database,
+                    schema: schema.clone(),
+                    table: Some(table.clone()),
+                };
+                this.open_data(node, Vec::new(), window, cx);
+            });
+        self._subscriptions.push(subscription);
     }
 
     pub fn with_data_sources(

@@ -13,13 +13,6 @@ use crate::data_grid::is_numeric_type;
 /// Table details by (schema, table).
 pub type Tables = HashMap<(String, String), Arc<TableInfo>>;
 
-/// A group of columns in the picker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Section {
-    pub title: String,
-    pub choices: Vec<(String, Source)>,
-}
-
 /// Rows related to a row of the view: its parent through a foreign key, or
 /// its children through one pointing at it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,15 +29,62 @@ pub struct Link {
 /// How deep lookups follow foreign keys.
 const DEPTH: usize = 2;
 
-/// Lookup sections along every many-to-one path from `path`'s end, then
-/// one summary section per table pointing at the base table.
+/// How a picker section relates to the view's table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// The view's own table.
+    Own,
+    /// Reached through foreign keys: each row has one.
+    BelongsTo,
+    /// Tables pointing at this one: each row has many.
+    HasMany,
+}
+
+/// One column (or aggregate) the picker offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Choice {
+    pub label: String,
+    /// The column an aggregate reads, to group chips by; `None` for
+    /// plain columns and `count`.
+    pub column: Option<String>,
+    pub source: Source,
+}
+
+/// A table in the picker's list, with what it offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Section {
+    pub kind: Kind,
+    /// The path as the view names it: `customer`, `customer › country`.
+    pub title: String,
+    pub table: String,
+    /// How it is reached: `customer_id → customers.id`, `via order_id`.
+    pub via: String,
+    /// Steps from the view's table, for indenting chained lookups.
+    pub depth: usize,
+    pub choices: Vec<Choice>,
+}
+
+fn plain(name: &str, source: Source) -> Choice {
+    Choice {
+        label: name.to_owned(),
+        column: None,
+        source,
+    }
+}
+
+/// The view's table, every table reachable through many-to-one paths (two
+/// steps deep), then one section per table pointing at the view's table.
 pub fn sections(schema: &str, base: &TableInfo, tables: &Tables, custom: &[Hop]) -> Vec<Section> {
     let mut out = vec![Section {
+        kind: Kind::Own,
         title: base.name.clone(),
+        table: base.name.clone(),
+        via: "this table".into(),
+        depth: 0,
         choices: base
             .columns
             .iter()
-            .map(|c| (c.name.clone(), Source::Base(c.name.clone())))
+            .map(|c| plain(&c.name, Source::Base(c.name.clone())))
             .collect(),
     }];
     let hops: Vec<Hop> = base
@@ -61,14 +101,15 @@ pub fn sections(schema: &str, base: &TableInfo, tables: &Tables, custom: &[Hop])
             continue;
         };
         let children = Children::from_fk(&schema_name, &table, fk);
-        let mut choices = vec![(
-            "count".to_string(),
-            Source::Summary {
+        let mut choices = vec![Choice {
+            label: "count".into(),
+            column: None,
+            source: Source::Summary {
                 children: children.clone(),
                 agg: Agg::Count,
                 column: None,
             },
-        )];
+        }];
         for c in &info.columns {
             let aggs: &[Agg] = if is_numeric_type(&c.data_type) {
                 &[Agg::Sum, Agg::Avg, Agg::Min, Agg::Max]
@@ -76,18 +117,23 @@ pub fn sections(schema: &str, base: &TableInfo, tables: &Tables, custom: &[Hop])
                 &[Agg::List, Agg::Min, Agg::Max]
             };
             for agg in aggs {
-                choices.push((
-                    format!("{}({})", agg.label(), c.name),
-                    Source::Summary {
+                choices.push(Choice {
+                    label: agg.label().into(),
+                    column: Some(c.name.clone()),
+                    source: Source::Summary {
                         children: children.clone(),
                         agg: *agg,
                         column: Some(c.name.clone()),
                     },
-                ));
+                });
             }
         }
         out.push(Section {
-            title: format!("{table} ← has many, via {}", fk.columns.join(", ")),
+            kind: Kind::HasMany,
+            title: table.clone(),
+            table,
+            via: format!("via {}", fk.columns.join(", ")),
+            depth: 0,
             choices,
         });
     }
@@ -101,13 +147,22 @@ fn lookups(path: Vec<Hop>, tables: &Tables, out: &mut Vec<Section>) {
     };
     let labels: Vec<String> = path.iter().map(Hop::label).collect();
     out.push(Section {
-        title: format!("{} → {}", labels.join(" › "), hop.table),
+        kind: Kind::BelongsTo,
+        title: labels.join(" › "),
+        table: hop.table.clone(),
+        via: format!(
+            "{} → {}.{}",
+            hop.columns.join(", "),
+            hop.table,
+            hop.ref_columns.join(", ")
+        ),
+        depth: path.len() - 1,
         choices: info
             .columns
             .iter()
             .map(|c| {
-                (
-                    c.name.clone(),
+                plain(
+                    &c.name,
                     Source::Lookup {
                         path: path.clone(),
                         column: c.name.clone(),
@@ -269,23 +324,34 @@ mod tests {
     fn sections_follow_paths_and_summaries() {
         let tables = shop();
         let orders = tables[&("shop".to_string(), "orders".to_string())].clone();
-        let titles: Vec<String> = sections("shop", &orders, &tables, &[])
-            .into_iter()
-            .map(|s| s.title)
+        let sections = sections("shop", &orders, &tables, &[]);
+        let list: Vec<(Kind, &str, &str, usize)> = sections
+            .iter()
+            .map(|s| (s.kind, s.title.as_str(), s.via.as_str(), s.depth))
             .collect();
         assert_eq!(
-            titles,
+            list,
             [
-                "orders",
-                "customer → customers",
-                "customer › countries → countries",
-                "order_items ← has many, via order_id",
+                (Kind::Own, "orders", "this table", 0),
+                (Kind::BelongsTo, "customer", "customer_id → customers.id", 0),
+                (
+                    Kind::BelongsTo,
+                    "customer › countries",
+                    "country_code → countries.code",
+                    1
+                ),
+                (Kind::HasMany, "order_items", "via order_id", 0),
             ]
         );
-        let items = sections("shop", &orders, &tables, &[]).pop().unwrap();
-        let labels: Vec<&str> = items.choices.iter().map(|(l, _)| l.as_str()).collect();
-        assert_eq!(&labels[..3], ["count", "sum(order_id)", "avg(order_id)"]);
-        assert!(labels.contains(&"list(sku)"));
+        let items = &sections[3].choices;
+        assert_eq!(
+            (items[0].label.as_str(), items[0].column.as_deref()),
+            ("count", None)
+        );
+        assert_eq!(
+            (items[1].label.as_str(), items[1].column.as_deref()),
+            ("sum", Some("order_id"))
+        );
     }
 
     #[test]

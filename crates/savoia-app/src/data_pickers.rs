@@ -6,11 +6,13 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, StyledExt as _, WindowExt as _,
+    h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -18,8 +20,9 @@ use savoia_core::data_query::{Agg, Hop, Source, Summary};
 use savoia_core::sql_text::{quote_ident, quote_literal};
 use savoia_core::{Engine, TableInfo};
 
-use crate::relations::Section;
+use crate::relations::{Choice, Kind, Section};
 use crate::session::Session;
+use crate::theme;
 use crate::{runtime, session};
 
 type Toggle = Rc<dyn Fn(Source, &mut Window, &mut App)>;
@@ -27,125 +30,358 @@ type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 type OnValue = Rc<dyn Fn(Option<String>, &mut Window, &mut App)>;
 type OnHop = Rc<dyn Fn(Hop, &mut Window, &mut App)>;
 
-/// "+ Column": every column reachable through relationships, grouped by
-/// path. Clicking one adds it to the view, or removes it.
+/// What the column picker shows, read from its view on every render so it
+/// fills in once related tables have loaded.
+pub struct PickerData {
+    pub sections: Vec<Section>,
+    pub chosen: HashSet<Source>,
+    /// Related tables are still loading.
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+/// "Columns": the view's table and its relationships on the left, the
+/// selected one's columns (or aggregates) on the right. Clicking a column
+/// adds it to the view, or removes it.
 pub struct ColumnPicker {
-    sections: Vec<Section>,
-    chosen: HashSet<Source>,
-    search: Entity<InputState>,
+    data: Rc<dyn Fn(&App) -> PickerData>,
     on_toggle: Toggle,
     on_join: Action,
+    /// The selected section, by title and kind, so it survives reloads.
+    selected: Option<(Kind, String)>,
+    search: Entity<InputState>,
 }
 
 impl ColumnPicker {
     pub fn new(
-        sections: Vec<Section>,
-        chosen: HashSet<Source>,
+        data: Rc<dyn Fn(&App) -> PickerData>,
         on_toggle: Toggle,
         on_join: Action,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search columns"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Find a column"));
         cx.subscribe(&search, |_, _, _: &InputEvent, cx| cx.notify())
             .detach();
-        search.update(cx, |input, cx| input.focus(window, cx));
         Self {
-            sections,
-            chosen,
-            search,
+            data,
             on_toggle,
             on_join,
+            selected: None,
+            search,
         }
     }
 
     pub fn toggle(&mut self, source: Source, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.chosen.remove(&source) {
-            self.chosen.insert(source.clone());
-        }
         (self.on_toggle)(source, window, cx);
         cx.notify();
+    }
+
+    fn select(&mut self, section: &Section, cx: &mut Context<Self>) {
+        self.selected = Some((section.kind, section.title.clone()));
+        cx.notify();
+    }
+}
+
+fn kind_heading(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Own => "This table",
+        Kind::BelongsTo => "Belongs to",
+        Kind::HasMany => "Has many",
     }
 }
 
 impl Render for ColumnPicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let search = self.search.read(cx).value().to_lowercase();
+        let data = (self.data)(cx);
+        let search = self.search.read(cx).value().trim().to_lowercase();
+        let matches = |c: &Choice| {
+            search.is_empty()
+                || c.label.to_lowercase().contains(&search)
+                || c.column
+                    .as_deref()
+                    .is_some_and(|col| col.to_lowercase().contains(&search))
+        };
+        // A search shows only tables with a matching column.
+        let visible: Vec<&Section> = data
+            .sections
+            .iter()
+            .filter(|s| search.is_empty() || s.choices.iter().any(matches))
+            .collect();
+        let current = self
+            .selected
+            .as_ref()
+            .and_then(|(kind, title)| {
+                visible
+                    .iter()
+                    .find(|s| s.kind == *kind && &s.title == title)
+                    .copied()
+            })
+            .or(visible.first().copied());
+
+        // Left: the relationships, grouped by direction.
         let mut list = v_flex()
-            .id("column-choices")
-            .h(px(440.))
-            .overflow_y_scroll();
-        let mut n: usize = 0;
-        for section in &self.sections {
-            let matching: Vec<&(String, Source)> = section
-                .choices
-                .iter()
-                .filter(|(label, _)| {
-                    search.is_empty()
-                        || label.to_lowercase().contains(&search)
-                        || section.title.to_lowercase().contains(&search)
-                })
-                .collect();
-            if matching.is_empty() {
-                continue;
-            }
-            list = list.child(
-                div()
-                    .px_2()
-                    .pt_2()
-                    .pb_1()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(section.title.clone()),
-            );
-            for (label, source) in matching {
-                let chosen = self.chosen.contains(source);
-                let source = source.clone();
-                n += 1;
+            .id("picker-tables")
+            .w(px(250.))
+            .h_full()
+            .overflow_y_scroll()
+            .py_1();
+        let mut last_kind = None;
+        for (ix, section) in visible.iter().enumerate() {
+            if last_kind != Some(section.kind) {
+                last_kind = Some(section.kind);
                 list = list.child(
-                    h_flex()
-                        .id(("column-choice", n))
-                        .px_2()
-                        .py_1()
-                        .gap_2()
-                        .rounded(px(4.))
-                        .cursor_pointer()
-                        .hover(|el| el.bg(theme.accent))
-                        .child(
-                            div()
-                                .w(px(16.))
-                                .when(chosen, |el| el.child(Icon::new(IconName::Check).xsmall())),
-                        )
-                        .child(div().text_sm().child(label.clone()))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.toggle(source.clone(), window, cx)
-                        })),
+                    div()
+                        .px_3()
+                        .pt_3()
+                        .pb_1()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(kind_heading(section.kind)),
                 );
             }
+            let chosen = section
+                .choices
+                .iter()
+                .filter(|c| data.chosen.contains(&c.source))
+                .count();
+            let active = current.is_some_and(|c| std::ptr::eq(c, *section));
+            let icon = match section.kind {
+                Kind::Own => Icon::new(Lucide::Table),
+                Kind::BelongsTo => Icon::new(IconName::ArrowRight),
+                Kind::HasMany => Icon::new(IconName::ArrowLeft),
+            };
+            let target = (*section).clone();
+            list = list.child(
+                h_flex()
+                    .id(("picker-table", ix))
+                    .mx_1()
+                    .pl(px(8. + 14. * section.depth as f32))
+                    .pr_2()
+                    .py_1()
+                    .gap_2()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .when(active, |el| el.bg(theme.selection))
+                    .when(!active, |el| el.hover(|el| el.bg(theme.list_hover)))
+                    .child(icon.small().text_color(theme.muted_foreground))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().text_sm().truncate().child(section.title.clone()))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .truncate()
+                                    .text_color(theme.muted_foreground)
+                                    .child(section.via.clone()),
+                            ),
+                    )
+                    .when(chosen > 0, |el| {
+                        el.child(
+                            div()
+                                .px_1p5()
+                                .rounded_full()
+                                .bg(theme::c(theme::IVREA_GREEN))
+                                .text_xs()
+                                .text_color(theme::c(theme::BAND_INK))
+                                .child(chosen.to_string()),
+                        )
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| this.select(&target, cx))),
+            );
         }
+        if data.loading {
+            list = list.child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("Finding related tables…"),
+            );
+        }
+        if let Some(err) = data.error.clone() {
+            list = list.child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_xs()
+                    .text_color(theme.danger)
+                    .child(format!("Couldn't load related tables: {err}")),
+            );
+        }
+
+        // Right: the selected table's columns, or its aggregates.
+        let mut columns = v_flex()
+            .id("picker-columns")
+            .flex_1()
+            .h_full()
+            .overflow_y_scroll()
+            .py_1();
+        if let Some(section) = current {
+            columns = columns.child(
+                v_flex()
+                    .px_3()
+                    .pt_2()
+                    .pb_2()
+                    .child(div().text_sm().font_semibold().child(section.title.clone()))
+                    .child(div().text_xs().text_color(theme.muted_foreground).child(
+                        match section.kind {
+                            Kind::Own => format!("Columns of {}", section.table),
+                            Kind::BelongsTo => {
+                                format!("One {} per row · {}", section.table, section.via)
+                            }
+                            Kind::HasMany => format!(
+                                "Many {} per row, summarized · {}",
+                                section.table, section.via
+                            ),
+                        },
+                    )),
+            );
+            let row = |id: ElementId, chosen: bool| {
+                h_flex()
+                    .id(id)
+                    .mx_1()
+                    .px_2()
+                    .py_1()
+                    .gap_2()
+                    .rounded(px(6.))
+                    .hover(|el| el.bg(theme.list_hover))
+                    .child(div().w(px(14.)).when(chosen, |el| {
+                        el.child(
+                            Icon::new(IconName::Check)
+                                .xsmall()
+                                .text_color(theme::c(theme::IVREA_LINE)),
+                        )
+                    }))
+            };
+            let mut n: usize = 0;
+            if section.kind == Kind::HasMany {
+                // `count` on its own row, then one row per column with its
+                // aggregates as chips.
+                let mut by_column: Vec<(String, Vec<&Choice>)> = Vec::new();
+                for choice in section.choices.iter().filter(|c| matches(c)) {
+                    match &choice.column {
+                        None => {
+                            n += 1;
+                            let source = choice.source.clone();
+                            columns = columns.child(
+                                row(
+                                    ("picker-col", n).into(),
+                                    data.chosen.contains(&choice.source),
+                                )
+                                .cursor_pointer()
+                                .child(div().text_sm().child("count rows"))
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.toggle(source.clone(), window, cx)
+                                    },
+                                )),
+                            );
+                        }
+                        Some(column) => match by_column.iter_mut().find(|(c, _)| c == column) {
+                            Some((_, list)) => list.push(choice),
+                            None => by_column.push((column.clone(), vec![choice])),
+                        },
+                    }
+                }
+                for (column, choices) in by_column {
+                    let any = choices.iter().any(|c| data.chosen.contains(&c.source));
+                    let mut chips = h_flex().gap_1();
+                    for choice in choices {
+                        n += 1;
+                        let on = data.chosen.contains(&choice.source);
+                        let source = choice.source.clone();
+                        chips = chips.child(
+                            div()
+                                .id(("picker-agg", n))
+                                .px_1p5()
+                                .rounded(px(4.))
+                                .border_1()
+                                .border_color(if on {
+                                    theme::c(theme::IVREA_LINE)
+                                } else {
+                                    theme.border
+                                })
+                                .when(on, |el| el.bg(theme.selection))
+                                .text_xs()
+                                .cursor_pointer()
+                                .child(choice.label.clone())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.toggle(source.clone(), window, cx)
+                                })),
+                        );
+                    }
+                    n += 1;
+                    columns = columns.child(
+                        row(("picker-col", n).into(), any)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_sm()
+                                    .font_family("monospace")
+                                    .child(column),
+                            )
+                            .child(chips),
+                    );
+                }
+            } else {
+                for choice in section.choices.iter().filter(|c| matches(c)) {
+                    n += 1;
+                    let source = choice.source.clone();
+                    columns = columns.child(
+                        row(
+                            ("picker-col", n).into(),
+                            data.chosen.contains(&choice.source),
+                        )
+                        .cursor_pointer()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_family("monospace")
+                                .child(choice.label.clone()),
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| this.toggle(source.clone(), window, cx),
+                        )),
+                    );
+                }
+            }
+        }
+
         let on_join = self.on_join.clone();
         v_flex()
             .gap_2()
+            .child(Input::new(&self.search).small())
             .child(
                 h_flex()
-                    .gap_2()
-                    .child(div().flex_1().child(Input::new(&self.search).small()))
-                    .child(
-                        Button::new("join-another")
-                            .ghost()
-                            .small()
-                            .label("Join another table…")
-                            .tooltip(
-                                "Match columns with a table that has no foreign key to this one",
-                            )
-                            .on_click(move |_, window, cx| {
-                                window.close_dialog(cx);
-                                on_join(window, cx);
-                            }),
-                    ),
+                    .h(px(420.))
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(list)
+                    .child(div().w(px(1.)).h_full().bg(theme.border))
+                    .child(columns),
             )
-            .child(list)
+            .child(
+                h_flex().child(
+                    Button::new("join-another")
+                        .ghost()
+                        .small()
+                        .icon(Icon::new(Lucide::Link2))
+                        .label("Join another table…")
+                        .tooltip("Match columns with a table that has no foreign key to this one")
+                        .on_click(move |_, window, cx| {
+                            window.close_dialog(cx);
+                            on_join(window, cx);
+                        }),
+                ),
+            )
     }
 }
 
@@ -314,7 +550,7 @@ impl Render for RowPicker {
     }
 }
 
-type Choice = SelectState<SearchableVec<SharedString>>;
+type Dropdown = SelectState<SearchableVec<SharedString>>;
 
 /// "Join another table…": pick a table and the column pair that relates a
 /// row of this table to one of it. Becomes a many-to-one step like an FK.
@@ -322,14 +558,14 @@ pub struct JoinDialog {
     base: Arc<TableInfo>,
     /// Candidate tables, as (schema, details).
     tables: Vec<(String, Arc<TableInfo>)>,
-    table: Entity<Choice>,
-    base_column: Entity<Choice>,
-    target_column: Entity<Choice>,
+    table: Entity<Dropdown>,
+    base_column: Entity<Dropdown>,
+    target_column: Entity<Dropdown>,
     on_add: OnHop,
     _subscriptions: Vec<Subscription>,
 }
 
-fn choice(items: Vec<String>, window: &mut Window, cx: &mut App) -> Entity<Choice> {
+fn choice(items: Vec<String>, window: &mut Window, cx: &mut App) -> Entity<Dropdown> {
     let items = SearchableVec::new(
         items
             .into_iter()
