@@ -10,8 +10,12 @@ use cargo_packager_updater::{Config, Update, UpdaterBuilder};
 /// Set by the release workflow from the repository's updater key.
 const PUBKEY: Option<&str> = option_env!("SAVOIA_UPDATER_PUBKEY");
 
-const MANIFEST: &str =
-    "https://github.com/joaoGabriel55/savoia-studio/releases/latest/download/latest.json";
+/// The manifest of the latest release. `SAVOIA_UPDATER_ENDPOINT` replaces it
+/// at build time, for testing an update end to end against a local server.
+const MANIFEST: &str = match option_env!("SAVOIA_UPDATER_ENDPOINT") {
+    Some(url) => url,
+    None => "https://github.com/joaoGabriel55/savoia-studio/releases/latest/download/latest.json",
+};
 
 pub fn enabled() -> bool {
     PUBKEY.is_some_and(|key| !key.is_empty())

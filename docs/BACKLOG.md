@@ -3,7 +3,7 @@
 The work still missing from [PLAN.md](./PLAN.md), split into tasks small enough to ship one per PR.
 Each task lists where it lives, what "done" means, and a rough estimate for one developer.
 
-Status as of 2026-10-10: M0–M4 are done. M5 is done except signing secrets and the v0.1.0 tag.
+Status as of 2026-10-10: M0–M4 are done. M5 is done except publishing v0.1.0, which needs the maintainer.
 
 Legend: **[ ]** open · **[~]** partly done · **[x]** done
 
@@ -64,8 +64,8 @@ Release mechanics are in [RELEASING.md](./RELEASING.md). Decisions: [packaging a
 | 5.1 | [x] Command palette (⌘⇧P) over every app command, with keybindings for tabs, settings and quit, and a macOS menu bar (`commands.rs`). |
 | 5.2 | [x] Settings tab (⌘,): appearance, dump tools folder, updates, crash reports, keyboard list, about (`settings.rs`, `settings_view.rs`). |
 | 5.3 | [x] Light theme: Olivetti-paper palette beside graphite in `theme.rs`; Match system follows the OS live. |
-| 5.4 | [~] Packaging and auto-update done: cargo-packager config, release workflow, signed `latest.json`, in-app updater; dmg is 12.9 MB. Left: Apple and Windows signing secrets, and a live update test against a published release. |
-| 5.5 | [~] Opt-in crash reports, docs site (`docs/site`, mdBook on Pages), license files and CHANGELOG are done. Left: tag and publish v0.1.0. |
+| 5.4 | [x] Packaging and auto-update: cargo-packager config, a release workflow that also builds every installer on packaging PRs, signed `latest.json`, and an in-app updater tested end to end on macOS (update installs; a tampered package is refused). The dmg is 12.9 MB. Code signing is deferred: v0.1 ships unsigned on macOS and Windows. |
+| 5.5 | [~] Opt-in crash reports, docs site, license files and CHANGELOG are done. Left, for the maintainer: set the two updater secrets, turn on Pages, merge, then tag `v0.1.0` and publish the draft (see [RELEASING.md](./RELEASING.md)). |
 | 5.6 | [x] Ko-fi button at the top of README.md, in the status bar and in Settings › About. |
 
 ## Release checks

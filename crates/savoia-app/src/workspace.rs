@@ -553,7 +553,8 @@ impl Workspace {
         if !updates::enabled() {
             if manual {
                 window.push_notification(
-                    Notification::info("This build can't update itself. Download new versions from GitHub Releases."),
+                    Notification::info("This build can't update itself. Download new versions from GitHub Releases.")
+                        .id::<UpdateNotice>(),
                     cx,
                 );
             }
@@ -570,6 +571,7 @@ impl Workspace {
                     let update = std::sync::Arc::new(*update);
                     window.push_notification(
                         Notification::info(format!("Savoia Studio {version} is available."))
+                            .id::<UpdateNotice>()
                             .title("Update available")
                             .action(move |_, _, _| {
                                 let update = update.clone();
@@ -588,11 +590,13 @@ impl Workspace {
                     Notification::success(format!(
                         "Savoia Studio {} is the latest version.",
                         env!("CARGO_PKG_VERSION")
-                    )),
+                    ))
+                    .id::<UpdateNotice>(),
                     cx,
                 ),
                 Err(error) if manual => window.push_notification(
-                    Notification::error(format!("Couldn't check for updates: {error}")),
+                    Notification::error(format!("Couldn't check for updates: {error}"))
+                        .id::<UpdateNotice>(),
                     cx,
                 ),
                 _ => {}
@@ -942,6 +946,9 @@ impl Render for Workspace {
     }
 }
 
+/// Keys the update notifications, so each step replaces the one before.
+struct UpdateNotice;
+
 /// Downloads and installs on the I/O runtime, then restarts into the new
 /// version. Failures land in a notification; the running app is untouched.
 fn install_update(
@@ -949,7 +956,12 @@ fn install_update(
     window: &mut Window,
     cx: &mut App,
 ) {
-    window.push_notification(Notification::info("Downloading the update…"), cx);
+    window.push_notification(
+        Notification::info("Downloading the update…")
+            .id::<UpdateNotice>()
+            .autohide(false),
+        cx,
+    );
     let install = runtime::spawn_blocking(move || updates::install(&update));
     window
         .spawn(cx, async move |cx| {
@@ -957,7 +969,9 @@ fn install_update(
             cx.update(|window, cx| match result {
                 Ok(()) => cx.restart(),
                 Err(error) => window.push_notification(
-                    Notification::error(format!("The update failed: {error}")).autohide(false),
+                    Notification::error(format!("The update failed: {error}"))
+                        .id::<UpdateNotice>()
+                        .autohide(false),
                     cx,
                 ),
             })
