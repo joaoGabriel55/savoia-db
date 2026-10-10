@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "buried-raster",
+        "value": "*",
+        "files": [
+          "docs/site/landing/index.html"
+        ],
+        "createdAt": "2026-10-10T17:18:46.862Z",
+        "reason": "Claude: the light-theme screenshot sits at opacity 0 behind the Dark/Light toggle and fades in on click; intentional state, not a buried texture"
+      }
+    ]
+  }
+}

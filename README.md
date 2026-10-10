@@ -9,7 +9,11 @@
 
 A lightweight but feature-rich desktop database client for PostgreSQL and MySQL. 100% Rust, with a native GPU-rendered UI built on [GPUI Kit](https://gpui-kit.com). No webview.
 
-**[Download](https://github.com/joaoGabriel55/savoia-studio/releases/latest)** for macOS, Windows or Linux · **[Documentation](https://joaogabriel55.github.io/savoia-studio/)**
+Free: no trial, no license key, no account.
+
+**[Download](https://github.com/joaoGabriel55/savoia-studio/releases/latest)** for macOS, Windows or Linux · **[Website](https://joaogabriel55.github.io/savoia-studio/)** · **[Documentation](https://joaogabriel55.github.io/savoia-studio/docs/)**
+
+![Savoia Studio's main window: explorer, SQL console and result grid](docs/site/src/media/app-dark.webp)
 
 See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/adr/](docs/adr/README.md) for architecture decisions.
 
@@ -24,7 +28,7 @@ See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/adr/](docs/adr/README
 | `crates/savoia-store` | Saved connections (SQLite) and secrets (a user-only `0600` file) |
 | `crates/savoia-tunnel` | SSH tunnels (russh) with known_hosts verification |
 | `crates/savoia-transfer` | Dump and import: external client tools and the built-in engine |
-| `docs/site` | The user documentation (mdBook), published to GitHub Pages |
+| `docs/site` | The website: landing page (`landing/`) and user documentation (mdBook, `src/`), published to GitHub Pages |
 
 ## Prerequisites
 
@@ -40,6 +44,8 @@ cargo build -p savoia-app --release
 
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+
+npm run docs                       # the website and docs on http://localhost:3000, rebuilt on change (needs mdbook)
 
 docker compose up -d --wait        # Postgres 17 :54317 (TLS on), MySQL 8.4 :33084, SSH bastion :2222 — all savoia/savoia
 ```

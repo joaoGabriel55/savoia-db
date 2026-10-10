@@ -18,7 +18,7 @@ Decisions behind this plan live in [`docs/adr/`](./adr/README.md). Open work, ta
 - **Import**: `.sql` file (stop or continue on error), CSV into a table with column mapping, pg custom archives via `pg_restore`.
 - Light and dark theme, keyboard-first, command palette.
 
-**Later**: ER diagram, table designer (ALTER UI), schema diff, saved queries/folders, SQLite/MariaDB/SQL Server, AI assistant, query plan visualizer.
+**Later**: ER diagram, table designer (ALTER UI), schema diff, saved queries/folders, more engines (SQLite, dedicated MariaDB, SQL Server, MongoDB; announced on the site as coming soon), AI assistant, query plan visualizer.
 
 ## 2. Architecture
 

@@ -1,12 +1,19 @@
 [book]
 title = "Savoia Studio"
-description = "A native database client for PostgreSQL and MySQL."
+description = "A free, native database client for PostgreSQL and MySQL."
 authors = ["Gabriel Quaresma"]
 language = "en"
 src = "src"
 
+[build]
+# The landing page (docs/site/landing) sits at the site root; the docs live under /docs/.
+build-dir = "book/docs"
+
 [output.html]
+site-url = "/savoia-studio/docs/"
 git-repository-url = "https://github.com/joaoGabriel55/savoia-studio"
 edit-url-template = "https://github.com/joaoGabriel55/savoia-studio/edit/main/docs/site/{path}"
 default-theme = "light"
-preferred-dark-theme = "navy"
+preferred-dark-theme = "coal"
+additional-css = ["theme/savoia.css"]
+additional-js = ["theme/savoia.js"]

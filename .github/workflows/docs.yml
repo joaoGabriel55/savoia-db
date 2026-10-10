@@ -1,6 +1,7 @@
 name: Docs
 
-# Builds docs/site with mdBook and publishes it to GitHub Pages.
+# Builds docs/site with mdBook under /docs/, puts the landing page at the root,
+# and publishes both to GitHub Pages.
 
 on:
   push:
@@ -27,6 +28,8 @@ jobs:
           curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.52/mdbook-v0.4.52-x86_64-unknown-linux-gnu.tar.gz | tar -xz
           ./mdbook --version
       - run: ./mdbook build docs/site
+      - name: Add the landing page
+        run: cp -R docs/site/landing/. docs/site/book/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/site/book

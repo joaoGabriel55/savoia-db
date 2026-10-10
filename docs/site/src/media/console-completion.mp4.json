@@ -1,0 +1,4 @@
+{
+  "prompt": "Origin: screen recording of the real Savoia Studio release build (macOS, 2026-10-10), connected to local PostgreSQL 17 with samples/serie_a; two crops of the same frames (editor with completion popup, and the result grid's first rows) stacked with a 2px seam to drop the empty middle; encoded with ffmpeg. Not generated.",
+  "createdAt": "2026-10-10T17:42:31.550Z"
+}

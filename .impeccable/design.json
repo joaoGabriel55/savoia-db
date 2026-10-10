@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-09T14:35:15+00:00",
+  "generatedAt": "2026-10-10T17:46:37+00:00",
   "title": "Design System: Savoia Studio",
   "extensions": {
     "colorMeta": {
@@ -513,6 +513,111 @@
           "#FDABDE",
           "#FEE7F4"
         ]
+      },
+      "web-paper": {
+        "role": "neutral",
+        "displayName": "Olivetti Paper",
+        "canonical": "#F7F6F2",
+        "tonalRamp": [
+          "#0C0B09",
+          "#262522",
+          "#43423F",
+          "#62615E",
+          "#83827F",
+          "#A6A5A1",
+          "#CAC9C5",
+          "#EFEEEA"
+        ]
+      },
+      "web-paper-panel": {
+        "role": "neutral",
+        "displayName": "Paper Panel",
+        "canonical": "#EEEDE7",
+        "tonalRamp": [
+          "#0C0B08",
+          "#262521",
+          "#43423D",
+          "#62615C",
+          "#83827D",
+          "#A6A5A0",
+          "#CAC9C3",
+          "#F0EFE9"
+        ]
+      },
+      "web-paper-seam": {
+        "role": "neutral",
+        "displayName": "Paper Seam",
+        "canonical": "#D6D4CB",
+        "tonalRamp": [
+          "#0D0B06",
+          "#27251E",
+          "#44423B",
+          "#636159",
+          "#84827A",
+          "#A7A59D",
+          "#CBC9C0",
+          "#F1EFE5"
+        ]
+      },
+      "web-paper-rule": {
+        "role": "neutral",
+        "displayName": "Paper Rule",
+        "canonical": "#E0DED6",
+        "tonalRamp": [
+          "#0D0B06",
+          "#27251F",
+          "#44423C",
+          "#63615A",
+          "#84827B",
+          "#A7A59D",
+          "#CBC9C1",
+          "#F1EFE6"
+        ]
+      },
+      "web-paper-ink": {
+        "role": "neutral",
+        "displayName": "Paper Ink",
+        "canonical": "#1C201D",
+        "tonalRamp": [
+          "#090C0A",
+          "#222623",
+          "#3F4340",
+          "#5E635F",
+          "#7F8480",
+          "#A1A7A3",
+          "#C5CBC7",
+          "#EBF0EC"
+        ]
+      },
+      "web-paper-muted": {
+        "role": "neutral",
+        "displayName": "Paper Muted",
+        "canonical": "#646B66",
+        "tonalRamp": [
+          "#080D09",
+          "#212723",
+          "#3D443F",
+          "#5C635E",
+          "#7D847F",
+          "#A0A7A2",
+          "#C4CBC6",
+          "#E9F1EB"
+        ]
+      },
+      "web-paper-line": {
+        "role": "neutral",
+        "displayName": "Paper Line",
+        "canonical": "#1B7650",
+        "tonalRamp": [
+          "#001500",
+          "#003312",
+          "#00522E",
+          "#16734D",
+          "#41956D",
+          "#66B98F",
+          "#8ADEB3",
+          "#B0FFD7"
+        ]
       }
     },
     "typographyMeta": {
@@ -539,6 +644,58 @@
       "editor-mono": {
         "displayName": "Editor Mono",
         "purpose": "The SQL editor."
+      },
+      "web-price": {
+        "displayName": "Web Price",
+        "purpose": "The giant Archivo 0 in the landing hero (width 125%)."
+      },
+      "web-display": {
+        "displayName": "Web Display",
+        "purpose": "Landing H1."
+      },
+      "web-headline": {
+        "displayName": "Web Headline",
+        "purpose": "Landing section heads."
+      },
+      "web-title": {
+        "displayName": "Web Title",
+        "purpose": "Landing step titles."
+      },
+      "web-figure": {
+        "displayName": "Web Figure",
+        "purpose": "Measured values in the spec table, in Ivrea Line."
+      },
+      "web-wordmark": {
+        "displayName": "Web Wordmark",
+        "purpose": "Savoia Studio wordmark in the band nav and docs menu band."
+      },
+      "web-docs-h1": {
+        "displayName": "Docs H1",
+        "purpose": "Chapter titles."
+      },
+      "web-docs-h2": {
+        "displayName": "Docs H2",
+        "purpose": "Section heads, with a hairline rule above."
+      },
+      "web-docs-h3": {
+        "displayName": "Docs H3",
+        "purpose": "Subsection heads."
+      },
+      "web-body": {
+        "displayName": "Web Body",
+        "purpose": "Landing reading text."
+      },
+      "web-docs-body": {
+        "displayName": "Docs Body",
+        "purpose": "Docs reading column."
+      },
+      "web-button": {
+        "displayName": "Web Button",
+        "purpose": "Download and Ko-fi button labels."
+      },
+      "web-mono": {
+        "displayName": "Web Mono",
+        "purpose": "Code, commands, file names, keycaps and plate amounts only."
       }
     },
     "shadows": [
@@ -546,10 +703,59 @@
         "name": "overlay",
         "value": "GPUI Kit default shadow",
         "purpose": "Dialogs, menus, popovers and notifications only; docked surfaces and band/Run buttons are flat."
+      },
+      {
+        "name": "web-hero-window",
+        "value": "drop-shadow(0 30px 60px rgba(8, 20, 14, 0.55)) drop-shadow(0 4px 12px rgba(8, 20, 14, 0.35))",
+        "purpose": "Landing: the app window rising out of the Ivrea hero (CSS filter)."
+      },
+      {
+        "name": "web-theme-frame",
+        "value": "drop-shadow(0 18px 40px rgba(0, 0, 0, 0.45))",
+        "purpose": "Landing: the dark/light screenshot switch on graphite (CSS filter)."
+      },
+      {
+        "name": "web-docs-capture-paper",
+        "value": "0 12px 32px rgba(17, 20, 18, 0.16), 0 1px 3px rgba(17, 20, 18, 0.12)",
+        "purpose": "Docs: framed captures and recordings on Olivetti paper."
+      },
+      {
+        "name": "web-docs-capture-graphite",
+        "value": "0 16px 40px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4)",
+        "purpose": "Docs: framed captures and recordings on graphite."
       }
     ],
-    "motion": [],
-    "breakpoints": []
+    "motion": [
+      {
+        "name": "web-ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Web: button state, theme-frame crossfade (320ms), ledger strike."
+      },
+      {
+        "name": "web-button-state",
+        "value": "160ms",
+        "purpose": "Web buttons: background change and 1px press."
+      },
+      {
+        "name": "web-ledger-strike",
+        "value": "520ms, staggered 140ms from 380ms; settle 400ms at 1500ms",
+        "purpose": "Landing: strikes draw through the ledger once on load; none under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "web-narrow",
+        "value": "960px"
+      },
+      {
+        "name": "web-phone",
+        "value": "640px"
+      },
+      {
+        "name": "web-docs-wide",
+        "value": "1280px"
+      }
+    ]
   },
   "components": [
     {
@@ -612,6 +818,53 @@
       "description": "Borderless monospace grid: panel header, hairline rows, Ivrea Line active cell.",
       "html": "<table class=\"ds-grid\"><thead><tr><th>#</th><th>table_name</th><th>rows</th></tr></thead><tbody><tr><td class=\"ds-num\">1</td><td>users</td><td class=\"ds-r\">1204</td></tr><tr><td class=\"ds-num\">2</td><td class=\"ds-active\">orders</td><td class=\"ds-r\">88310</td></tr></tbody></table>",
       "css": ".ds-grid { border-collapse: collapse; background: #161A17; color: #E9E6DF; font-family: ui-monospace, monospace; font-size: 14px; width: 360px; } .ds-grid th { background: #1D211E; color: #B8BDB8; font-family: system-ui, sans-serif; font-weight: 500; font-size: 12px; text-align: left; padding: 4px 8px; } .ds-grid td { padding: 4px 8px; border-bottom: 1px solid #272C28; } .ds-grid tr:hover td { background: #1F2420; } .ds-num { color: #8D938F; text-align: right; width: 44px; } .ds-r { text-align: right; } .ds-active { outline: 1px solid #5FB088; outline-offset: -1px; background: #213A31; }"
+    },
+    {
+      "name": "Web Download Button",
+      "kind": "button",
+      "refersTo": "web-button-download",
+      "description": "The site's one Savoy-blue action (Download-Only Blue Rule), beside Ko-fi on the Ivrea hero.",
+      "html": "<div class=\"ds-w-hero\"><a class=\"ds-w-btn ds-w-dl\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 15V3\"/><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><path d=\"m7 10 5 5 5-5\"/></svg>Download for macOS</a><a class=\"ds-w-btn ds-w-kofi\" href=\"#\"><span class=\"ds-w-cup\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M10 2v2\"/><path d=\"M14 2v2\"/><path d=\"M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1\"/><path d=\"M6 2v2\"/></svg></span>Support on Ko-fi</a></div>",
+      "css": ".ds-w-hero { display: inline-flex; gap: 12px; padding: 24px; background: #1F5A43; } .ds-w-btn { font: 600 16px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 20px; border-radius: 6px; text-decoration: none; transition: background-color 160ms cubic-bezier(0.16,1,0.3,1), transform 160ms cubic-bezier(0.16,1,0.3,1); } .ds-w-btn:active { transform: translateY(1px); } .ds-w-btn:focus-visible { outline: 2px solid #5FB088; outline-offset: 3px; } .ds-w-dl { background: #1F64B4; color: #fff; } .ds-w-dl:hover { background: #2B74C7; } .ds-w-dl:active { background: #1A5498; } .ds-w-kofi { background: #F2EFE8; color: #1C201D; } .ds-w-kofi:hover { background: #fff; } .ds-w-cup { display: inline-flex; color: #1F5A43; }"
+    },
+    {
+      "name": "Web Band Nav",
+      "kind": "nav",
+      "refersTo": "web-band-nav",
+      "description": "56px Ivrea band atop the landing: wordmark, tools, hairline separator, Ko-fi.",
+      "html": "<nav class=\"ds-w-band\"><span class=\"ds-w-mark\"><span class=\"ds-w-tile\"></span>Savoia Studio</span><a class=\"ds-w-tool\" href=\"#\">Docs</a><a class=\"ds-w-tool\" href=\"#\">GitHub</a><span class=\"ds-w-sep\"></span><a class=\"ds-w-tool\" href=\"#\">Ko-fi</a></nav>",
+      "css": ".ds-w-band { display: flex; align-items: center; gap: 4px; height: 56px; width: 560px; padding: 0 16px; background: #1F5A43; color: #F2EFE8; border-bottom: 1px solid #2F7458; } .ds-w-mark { display: flex; align-items: center; gap: 10px; margin-right: auto; font: 700 17px/1 Archivo, system-ui, sans-serif; font-stretch: 112%; letter-spacing: -0.01em; } .ds-w-tile { width: 28px; height: 28px; border-radius: 6px; background: #184634; box-shadow: 0 0 0 1px #2F7458; } .ds-w-tool { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 6px; font: 500 15px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #F2EFE8; text-decoration: none; } .ds-w-tool:hover { background: #286C51; } .ds-w-tool:focus-visible { outline: 2px solid #5FB088; outline-offset: 3px; } .ds-w-sep { width: 1px; height: 16px; margin: 0 4px; background: #2F7458; }"
+    },
+    {
+      "name": "Struck Ledger",
+      "kind": "custom",
+      "description": "What you do not need, ruled in band-rule; strikes draw once on load (settled state shown).",
+      "html": "<ul class=\"ds-w-ledger\"><li><span class=\"ds-w-item\">Free trial</span><span class=\"ds-w-none\">none, it's simply free</span></li><li><span class=\"ds-w-item\">License key</span><span class=\"ds-w-none\">none</span></li><li><span class=\"ds-w-item\">Telemetry</span><span class=\"ds-w-none\">none</span></li></ul>",
+      "css": ".ds-w-ledger { list-style: none; margin: 0; padding: 16px 24px; width: 460px; background: #1F5A43; color: #F2EFE8; } .ds-w-ledger li { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 8px 0; border-bottom: 1px solid #2F7458; } .ds-w-ledger li:first-child { border-top: 1px solid #2F7458; } .ds-w-item { position: relative; font: 600 17px/1.3 Archivo, system-ui, sans-serif; color: #B5D0C2; } .ds-w-item::after { content: ''; position: absolute; left: -4px; right: -4px; top: 55%; height: 2px; background: #F2EFE8; } .ds-w-none { font: 400 14px/1.3 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #B5D0C2; }"
+    },
+    {
+      "name": "Paper Plate",
+      "kind": "card",
+      "refersTo": "web-paper-plate",
+      "description": "Square Olivetti-paper receipt set into a graphite section; amounts in mono.",
+      "html": "<div class=\"ds-w-sec\"><aside class=\"ds-w-plate\"><h3>Savoia Studio</h3><div class=\"ds-w-muted\">For PostgreSQL and MySQL</div><hr><div class=\"ds-w-row\"><span>Desktop app, every feature</span><span class=\"ds-w-amt\">0.00</span></div><div class=\"ds-w-row\"><span>Seats, any number</span><span class=\"ds-w-amt\">0.00</span></div><hr><div class=\"ds-w-row ds-w-total\"><span>Total</span><span class=\"ds-w-amt\">0.00</span></div><a class=\"ds-w-kofi2\" href=\"#\">Buy me a coffee on Ko-fi</a></aside></div>",
+      "css": ".ds-w-sec { background: #161A17; padding: 24px; } .ds-w-plate { width: 340px; background: #F7F6F2; color: #1C201D; padding: 28px; font: 400 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-variant-numeric: tabular-nums; } .ds-w-plate h3 { margin: 0 0 2px; font: 700 22px/1.2 Archivo, system-ui, sans-serif; font-stretch: 112%; letter-spacing: -0.01em; } .ds-w-muted { color: #646B66; } .ds-w-plate hr { border: 0; border-top: 2px solid #1C201D; margin: 12px 0 4px; } .ds-w-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; } .ds-w-row + .ds-w-row { border-top: 1px solid #D6D4CB; } .ds-w-amt { font-family: ui-monospace, Menlo, monospace; font-size: 14px; } .ds-w-total { font-weight: 700; font-size: 17px; } .ds-w-kofi2 { display: flex; justify-content: center; align-items: center; min-height: 48px; margin-top: 20px; border-radius: 6px; background: #1F5A43; color: #F2EFE8; font: 600 16px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; text-decoration: none; } .ds-w-kofi2:hover { background: #286C51; } .ds-w-kofi2:focus-visible { outline: 2px solid #5FB088; outline-offset: 3px; }"
+    },
+    {
+      "name": "Docs Capture",
+      "kind": "card",
+      "refersTo": "web-docs-capture",
+      "description": "Real capture or recording framed at 10px with seam border, capture shadow and muted caption.",
+      "html": "<div class=\"ds-w-page\"><figure class=\"ds-w-shot\"><div class=\"ds-w-img\"></div><figcaption>The console: completion after <code>JOIN</code>.</figcaption></figure></div>",
+      "css": ".ds-w-page { background: #F7F6F2; padding: 24px; width: 480px; font: 400 17px/1.65 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #1C201D; } .ds-w-shot { margin: 0; } .ds-w-img { aspect-ratio: 16 / 9; border-radius: 10px; background: #EEEDE7; border: 1px solid #D6D4CB; box-shadow: 0 12px 32px rgba(17, 20, 18, 0.16), 0 1px 3px rgba(17, 20, 18, 0.12); } .ds-w-shot figcaption { margin-top: 10px; font-size: 0.85em; color: #646B66; } .ds-w-shot code { font-family: ui-monospace, Menlo, monospace; font-size: 0.875em; background: #EEEDE7; border: 1px solid #E0DED6; border-radius: 4px; padding: 0.1em 0.35em; }"
+    },
+    {
+      "name": "Docs Menu Band and Sidebar",
+      "kind": "nav",
+      "refersTo": "web-docs-menu-band",
+      "description": "mdBook menu bar as an Ivrea band with a band-ink Ko-fi chip; sidebar items at 6px with a green-tinted active row.",
+      "html": "<div class=\"ds-w-docs\"><div class=\"ds-w-mb\"><span class=\"ds-w-mt\">Savoia Studio</span><a class=\"ds-w-chip\" href=\"#\">Ko-fi</a></div><ol class=\"ds-w-side\"><li><a href=\"#\">Introduction</a></li><li><a class=\"ds-w-act\" href=\"#\">Connecting</a></li><li><a href=\"#\">The console</a></li></ol></div>",
+      "css": ".ds-w-docs { width: 520px; background: #F7F6F2; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; } .ds-w-mb { display: flex; align-items: center; height: 52px; padding: 0 12px; background: #1F5A43; color: #F2EFE8; } .ds-w-mt { margin-right: auto; font: 700 18px/1 Archivo, system-ui, sans-serif; font-stretch: 112%; letter-spacing: -0.01em; } .ds-w-chip { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 6px; background: #F2EFE8; color: #1C201D; font: 600 14px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; text-decoration: none; } .ds-w-chip:hover { background: #fff; } .ds-w-side { list-style: none; margin: 0; padding: 12px 8px 16px; width: 240px; background: #EEEDE7; font-size: 15px; } .ds-w-side a { display: block; padding: 7px 10px; border-radius: 6px; color: #48504A; text-decoration: none; } .ds-w-side a:hover { background: #E4E2DA; color: #1C201D; } .ds-w-side a:focus-visible { outline: 2px solid #1B7650; outline-offset: 2px; } .ds-w-act { background: #D3E6DC; color: #1C201D !important; font-weight: 600; }"
     }
   ],
   "narrative": {
@@ -660,6 +913,21 @@
         "name": "The Square Bars Rule",
         "body": "Structural bars never round; radius belongs to the controls placed on them.",
         "section": "shapes"
+      },
+      {
+        "name": "The Download-Only Blue Rule",
+        "body": "This is the web's exception to the Run-Only Blue Rule: on the site, Savoy blue fills the Download action and nothing else. It shows up twice on the landing, as the hero's OS-detected \"Download for …\" and as \"Latest release\". The docs carry no blue at all. Ko-fi is never blue: it takes a band-ink fill on green and an Ivrea fill on paper.",
+        "section": "colors"
+      },
+      {
+        "name": "The Wide Archivo Rule",
+        "body": "On the web, every display line is Archivo set wide. Reading text is the system sans, and mono marks only code, keys and amounts. Never set body copy in Archivo or headings in the system font.",
+        "section": "typography"
+      },
+      {
+        "name": "The Only-Captures-Lift Rule",
+        "body": "This is the web form of Docked-Is-Flat. A shadow on the site means \"this is the real app\". Text, plates, cards and controls stay flat.",
+        "section": "elevation"
       }
     ],
     "dos": [
@@ -668,14 +936,22 @@
       "Do draw every green line (focus, caret, active cell, active tab) in Ivrea Line.",
       "Do use violet for info, teal for success, saffron for warning, vermilion-orange for errors.",
       "Do carry the connection's tag color onto its explorer icon and console tab.",
-      "Do keep docked surfaces flat and let only overlays cast a shadow."
+      "Do keep docked surfaces flat and let only overlays cast a shadow.",
+      "Do open a web page on a drenched Ivrea field or band, and set the rest on graphite (or paper in the docs) ruled with hairlines.",
+      "Do keep Savoy blue to the Download action alone on the site.",
+      "Do set display lines in wide Archivo, reading text in the system sans, and mono only for code, keys and amounts.",
+      "Do show the product with real captures and recordings, each with a caption, and let only those captures cast a shadow.",
+      "Do map docs light to Olivetti paper and docs dark to graphite, with links in the appearance's line green."
     ],
     "donts": [
       "Don't use Savoy blue on anything but Run, and don't add a second blue control.",
       "Don't use red for brand or decoration; red only ever means danger.",
       "Don't use deep Ivrea green as a 1px stroke on graphite.",
       "Don't put toolkit-default disabled ink on a green band.",
-      "Don't drift toward DBeaver/Eclipse clutter, Electron SaaS gloss, or neon terminal cosplay."
+      "Don't drift toward DBeaver/Eclipse clutter, Electron SaaS gloss, or neon terminal cosplay.",
+      "Don't fill Ko-fi, links or any second control with Savoy blue, and don't add blue to the docs.",
+      "Don't shadow text, plates, cards or bands, and don't round bands or sections.",
+      "Don't offer mdBook's rust, navy or ayu looks."
     ]
   }
 }
