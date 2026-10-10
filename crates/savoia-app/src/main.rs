@@ -2,6 +2,7 @@ mod assets;
 mod completion;
 mod connection_form;
 mod console;
+mod data_grid;
 mod data_sources;
 mod data_view;
 mod diagram;

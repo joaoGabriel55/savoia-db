@@ -1189,3 +1189,151 @@ async fn postgres_data_view_pages_sorts_and_filters(cx: &mut TestAppContext) {
         .expect("window");
     assert!(other.read_with(cx, |v, _| v.query().is_none()));
 }
+
+/// Reads `sql`'s rows as text, on the source's session.
+fn fetch(session: Arc<Session>, sql: &str) -> Vec<Vec<Option<String>>> {
+    let sql = sql.to_owned();
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(crate::runtime::spawn(async move {
+        drop(tx.send(session.fetch(sql).await));
+    }));
+    let (_, rows) = rx
+        .recv_timeout(Duration::from_secs(15))
+        .expect("fetch timed out")
+        .expect("fetch failed");
+    rows.into_iter()
+        .map(|r| r.iter().map(|c| c.as_deref().map(str::to_owned)).collect())
+        .collect()
+}
+
+/// Edits, a new row and a deletion commit in one transaction; a change
+/// that no longer matches its row rolls everything back and stays pending.
+async fn data_view_edits_and_commits(url: &str, cx: &mut TestAppContext) {
+    let (ds, _) = save_and_connect(cx, url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    let session = session_of(cx, &ds).expect("connected");
+    // MySQL's test user can't create databases, so the table goes in `savoia`.
+    let mysql = url.starts_with("mysql");
+    let (schema, table) = if mysql {
+        ("savoia", "savoia.it_edit_players")
+    } else {
+        ("it_edit", "it_edit.players")
+    };
+    if !mysql {
+        exec(
+            session.clone(),
+            "DROP SCHEMA IF EXISTS it_edit CASCADE; CREATE SCHEMA it_edit;",
+        );
+    }
+    exec(
+        session.clone(),
+        &format!(
+            "DROP TABLE IF EXISTS {table};
+             CREATE TABLE {table} (id int PRIMARY KEY, name varchar(40), goals int DEFAULT 0);
+             INSERT INTO {table} VALUES (1, 'Baggio', 1), (2, 'Rivera', 2), (3, 'Riva', 3);"
+        ),
+    );
+    ds.update(cx, |ds, cx| ds.refresh(id, cx));
+    wait_until(cx, "the refresh", |cx| refresh_state(cx, &ds).is_none());
+    let node = NodeRef {
+        connection: id,
+        database: "savoia".into(),
+        schema: schema.into(),
+        table: Some(table.rsplit('.').next().unwrap().into()),
+    };
+    let (window, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| DataView::new(ds.clone(), node, window, cx))
+            })
+        })
+        .expect("window");
+    let rows = |cx: &mut TestAppContext, want: usize| {
+        wait_until(cx, "the rows", |cx| {
+            view.read_with(cx, |v, cx| v.rows(cx)) == Some((want, false))
+        });
+    };
+    rows(cx, 3);
+    let grid = view.read_with(cx, |v, _| v.grid().unwrap());
+    grid.update(cx, |g, _| {
+        let rows = g.delegate_mut();
+        rows.set(0, 1, Some("Totti".into()));
+        rows.set(1, 2, None);
+        rows.add_row();
+        rows.set(0, 0, Some("4".into()));
+        rows.set(0, 1, Some("Del Piero".into()));
+        // Loaded rows now start after the new one.
+        rows.toggle_delete(3);
+    });
+    let review = view
+        .read_with(cx, |v, cx| v.review_sql(cx))
+        .expect("changes");
+    assert_eq!(review.lines().count(), 6, "{review}");
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |v, cx| v.commit(window, cx))
+    })
+    .unwrap();
+    wait_until(cx, "the commit", |cx| {
+        view.read_with(cx, |v, cx| !v.is_committing() && v.review_sql(cx).is_none())
+    });
+    rows(cx, 3);
+    assert_eq!(
+        fetch(
+            session.clone(),
+            &format!("SELECT id, name, goals FROM {table} ORDER BY id")
+        ),
+        [
+            vec![Some("1".into()), Some("Totti".into()), Some("1".into())],
+            vec![Some("2".into()), Some("Rivera".into()), None],
+            vec![Some("4".into()), Some("Del Piero".into()), Some("0".into())],
+        ]
+    );
+
+    // Someone else deletes row 2 before our edit to it commits.
+    grid.update(cx, |g, _| {
+        g.delegate_mut().set(1, 1, Some("Mazzola".into()))
+    });
+    grid.update(cx, |g, _| {
+        g.delegate_mut().set(0, 1, Some("Francesco".into()))
+    });
+    exec(
+        session.clone(),
+        &format!("DELETE FROM {table} WHERE id = 2"),
+    );
+    cx.update_window(window, |_, window, cx| {
+        view.update(cx, |v, cx| v.commit(window, cx))
+    })
+    .unwrap();
+    wait_until(cx, "the rollback", |cx| {
+        view.read_with(cx, |v, _| {
+            v.error().is_some_and(|e| e.starts_with("Rolled back"))
+        })
+    });
+    assert!(
+        view.read_with(cx, |v, cx| v.review_sql(cx)).is_some(),
+        "still pending"
+    );
+    assert_eq!(
+        fetch(
+            session.clone(),
+            &format!("SELECT name FROM {table} WHERE id = 1")
+        ),
+        [vec![Some("Totti".to_string())]],
+        "the other change was rolled back too"
+    );
+    exec(session, &format!("DROP TABLE {table}"));
+}
+
+#[gpui_kit::test]
+async fn postgres_data_view_edits_and_commits(cx: &mut TestAppContext) {
+    if let Ok(url) = std::env::var("SAVOIA_PG_URL") {
+        data_view_edits_and_commits(&url, cx).await;
+    }
+}
+
+#[gpui_kit::test]
+async fn mysql_data_view_edits_and_commits(cx: &mut TestAppContext) {
+    if let Ok(url) = std::env::var("SAVOIA_MYSQL_URL") {
+        data_view_edits_and_commits(&url, cx).await;
+    }
+}

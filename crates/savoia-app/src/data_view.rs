@@ -2,6 +2,11 @@
 //! server ([`PAGE_SIZE`] rows each, loaded as the grid scrolls), header
 //! clicks sort on the server, and filter chips become the `WHERE` clause.
 //! The generated statement is always one click away.
+//!
+//! On tables with a key (and connections that aren't read-only), cells
+//! edit on double-click, rows are added and deleted, and the pending
+//! changes are reviewed as SQL and committed in one transaction. See
+//! `docs/adr/202610091908-write-data-edits-as-generated-sql-in-one-previewed-transaction.md`.
 //! See `docs/adr/202610091908-add-a-no-sql-data-view-with-visual-joins-to-v1.md`.
 
 use std::sync::Arc;
@@ -9,167 +14,23 @@ use std::sync::Arc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SearchableVec, Select, SelectState};
-use gpui_kit::component::table::{Column, ColumnSort, DataTable, TableDelegate, TableState};
+use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, IndexPath, Sizable as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _,
+    h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use savoia_core::data_query::{Filter, Op, PAGE_SIZE, TableQuery};
-use savoia_core::{ConnectionId, Engine, Row, TableInfo};
+use savoia_core::edit::EditTarget;
+use savoia_core::{ConnectionId, Engine, TableInfo, TableKind};
 
+use crate::data_grid::{DataRows, Request, Source};
 use crate::data_sources::DataSources;
 use crate::explorer::NodeRef;
 use crate::{runtime, session};
-
-/// What the grid asks of the view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Request {
-    /// Sort by a data column (0-based), descending or not; `None` resets.
-    Sort(Option<(usize, bool)>),
-    More,
-}
-
-/// The rows loaded so far, for the grid.
-pub struct DataRows {
-    columns: Vec<Column>,
-    numeric: Vec<bool>,
-    rows: Vec<Row>,
-    /// Another page exists on the server.
-    more: bool,
-    loading: bool,
-    request: Option<Request>,
-}
-
-impl DataRows {
-    fn new(info: &TableInfo) -> Self {
-        let numeric: Vec<bool> = info
-            .columns
-            .iter()
-            .map(|c| is_numeric_type(&c.data_type))
-            .collect();
-        let columns = std::iter::once(
-            Column::new("#", "")
-                .width(px(52.))
-                .text_right()
-                .fixed_left()
-                .resizable(false)
-                .selectable(false),
-        )
-        .chain(info.columns.iter().zip(&numeric).map(|(c, numeric)| {
-            let column = Column::new(SharedString::from(c.name.clone()), c.name.clone()).sortable();
-            if *numeric {
-                column.text_right()
-            } else {
-                column
-            }
-        }))
-        .collect();
-        Self {
-            columns,
-            numeric,
-            rows: Vec::new(),
-            more: false,
-            loading: true,
-            request: None,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.rows.len()
-    }
-
-    #[cfg(test)]
-    pub fn row(&self, ix: usize) -> &Row {
-        &self.rows[ix]
-    }
-}
-
-/// A coarse guess from the type the server prints, for alignment.
-fn is_numeric_type(data_type: &str) -> bool {
-    let t = data_type.to_ascii_lowercase();
-    [
-        "int", "numeric", "decimal", "real", "double", "float", "serial", "money",
-    ]
-    .iter()
-    .any(|n| t.contains(n))
-        && !t.contains("interval")
-        && !t.contains("point")
-}
-
-impl TableDelegate for DataRows {
-    fn columns_count(&self, _: &App) -> usize {
-        self.columns.len()
-    }
-
-    fn rows_count(&self, _: &App) -> usize {
-        self.rows.len()
-    }
-
-    fn column(&self, col_ix: usize, _: &App) -> Column {
-        self.columns[col_ix].clone()
-    }
-
-    fn render_td(
-        &mut self,
-        row_ix: usize,
-        col_ix: usize,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
-        let cell = h_flex().size_full().font_family("monospace").text_sm();
-        if col_ix == 0 {
-            return cell
-                .justify_end()
-                .text_color(muted)
-                .child((row_ix + 1).to_string());
-        }
-        let cell = cell.when(self.numeric[col_ix - 1], |c| c.justify_end());
-        match self.rows[row_ix][col_ix - 1].as_deref() {
-            Some(text) => cell.child(SharedString::from(text.to_owned())),
-            None => cell.text_color(muted).child("NULL"),
-        }
-    }
-
-    fn perform_sort(
-        &mut self,
-        col_ix: usize,
-        sort: ColumnSort,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) {
-        let sort = match (col_ix, sort) {
-            (0, _) | (_, ColumnSort::Default) => None,
-            (col, ColumnSort::Ascending) => Some((col - 1, false)),
-            (col, ColumnSort::Descending) => Some((col - 1, true)),
-        };
-        self.request = Some(Request::Sort(sort));
-        cx.notify();
-    }
-
-    fn has_more(&self, _: &App) -> bool {
-        self.more && !self.loading
-    }
-
-    fn load_more(&mut self, _: &mut Window, cx: &mut Context<TableState<Self>>) {
-        if self.more && !self.loading {
-            self.request = Some(Request::More);
-            cx.notify();
-        }
-    }
-
-    fn cell_text(&self, row_ix: usize, col_ix: usize, _: &App) -> String {
-        match col_ix {
-            0 => (row_ix + 1).to_string(),
-            _ => self.rows[row_ix][col_ix - 1]
-                .as_deref()
-                .unwrap_or("NULL")
-                .to_owned(),
-        }
-    }
-}
 
 pub enum DataViewEvent {
     /// Put this SQL in a console on the view's data source.
@@ -196,8 +57,11 @@ pub struct DataView {
     /// Always has a table.
     node: NodeRef,
     state: State,
-    /// Shown above the grid when a page fails to load.
+    /// Shown above the grid when a page fails to load or a commit fails.
     error: Option<String>,
+    /// Why the view can't edit, when it can't.
+    read_only: Option<&'static str>,
+    committing: bool,
     filter_column: Option<Entity<Choice>>,
     filter_op: Entity<Choice>,
     filter_value: Entity<InputState>,
@@ -236,6 +100,8 @@ impl DataView {
             node,
             state: State::Loading,
             error: None,
+            read_only: None,
+            committing: false,
             filter_column: None,
             filter_op,
             filter_value,
@@ -371,9 +237,31 @@ impl DataView {
         );
         self.filter_column =
             Some(cx.new(|cx| SelectState::new(names, Some(IndexPath::new(0)), window, cx)));
-        let grid = cx.new(|cx| TableState::new(DataRows::new(&info), window, cx));
+        let read_only_source = self
+            .data_sources
+            .read(cx)
+            .get(self.node.connection)
+            .is_some_and(|c| c.read_only);
+        self.read_only = if read_only_source {
+            Some("read-only connection")
+        } else if info.kind == TableKind::View {
+            Some("views are read-only")
+        } else if query.key.is_empty() {
+            Some("read-only: no primary or unique key")
+        } else {
+            None
+        };
+        let editable = self.read_only.is_none();
+        let rows = DataRows::new(&info, &query.key, editable);
+        let grid = cx.new(|cx| {
+            TableState::new(rows, window, cx)
+                .cell_selectable(true)
+                .row_header(false)
+        });
         self._subscriptions
             .push(cx.observe_in(&grid, window, Self::on_grid));
+        self._subscriptions
+            .push(cx.subscribe_in(&grid, window, Self::on_table_event));
         self.state = State::Ready { info, grid, query };
         self.reload(cx);
     }
@@ -399,8 +287,262 @@ impl DataView {
         }
     }
 
-    /// Starts over from the first page.
+    fn on_table_event(
+        &mut self,
+        grid: &Entity<TableState<DataRows>>,
+        event: &TableEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match *event {
+            TableEvent::SelectCell(row, col) if col > 0 => {
+                grid.update(cx, |g, _| g.delegate_mut().selected = Some((row, col - 1)));
+            }
+            TableEvent::DoubleClickedCell(row, col) if col > 0 => {
+                self.edit_cell(row, col - 1, window, cx);
+            }
+            _ => {}
+        }
+    }
+
+    fn grid_entity(&self) -> Option<Entity<TableState<DataRows>>> {
+        match &self.state {
+            State::Ready { grid, .. } => Some(grid.clone()),
+            _ => None,
+        }
+    }
+
+    /// Opens an input over a cell; Enter or leaving it keeps the value.
+    pub fn edit_cell(
+        &mut self,
+        row: usize,
+        col: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(grid) = self.grid_entity() else {
+            return;
+        };
+        let rows = grid.read(cx).delegate();
+        let deleted = matches!(rows.source(row), Source::Loaded(i) if rows.deleted.contains(&i));
+        if !rows.editable || deleted {
+            return;
+        }
+        let current = rows.value(row, col).map(str::to_owned);
+        let placeholder = if current.is_none() { "NULL" } else { "" };
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(current.clone().unwrap_or_default())
+                .placeholder(placeholder)
+        });
+        input.update(cx, |i, cx| i.focus(window, cx));
+        self._subscriptions.push(cx.subscribe_in(
+            &input,
+            window,
+            move |this, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                    this.finish_edit(cx);
+                }
+            },
+        ));
+        grid.update(cx, |g, cx| {
+            g.delegate_mut().editing = Some((row, col, input));
+            cx.notify();
+        });
+    }
+
+    /// Keeps the edited cell's value. Leaving a NULL cell empty keeps NULL.
+    pub fn finish_edit(&mut self, cx: &mut Context<Self>) {
+        let Some(grid) = self.grid_entity() else {
+            return;
+        };
+        grid.update(cx, |g, cx| {
+            let rows = g.delegate_mut();
+            let Some((row, col, input)) = rows.editing.take() else {
+                return;
+            };
+            let text = input.read(cx).value().to_string();
+            let was_null = rows.value(row, col).is_none();
+            if !(was_null && text.is_empty()) {
+                rows.set(row, col, Some(text));
+            }
+            g.refresh(cx);
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn is_committing(&self) -> bool {
+        self.committing
+    }
+
+    pub fn add_row(&mut self, cx: &mut Context<Self>) {
+        if self.committing {
+            return;
+        }
+        if let Some(grid) = self.grid_entity() {
+            grid.update(cx, |g, cx| {
+                g.delegate_mut().add_row();
+                g.refresh(cx);
+                cx.notify();
+            });
+        }
+    }
+
+    fn pending(&self, cx: &App) -> usize {
+        self.grid_entity()
+            .map_or(0, |g| g.read(cx).delegate().changes().len())
+    }
+
+    fn edit_target(&self) -> Option<EditTarget> {
+        let State::Ready { info, query, .. } = &self.state else {
+            return None;
+        };
+        Some(EditTarget {
+            engine: query.engine,
+            container: query.container.clone(),
+            table: query.table.clone(),
+            columns: info
+                .columns
+                .iter()
+                .map(|c| (c.name.clone(), c.data_type.clone()))
+                .collect(),
+        })
+    }
+
+    /// The pending changes as the script that commit runs.
+    pub fn review_sql(&self, cx: &App) -> Option<String> {
+        let target = self.edit_target()?;
+        let changes = self.grid_entity()?.read(cx).delegate().changes();
+        (!changes.is_empty()).then(|| target.script(&changes))
+    }
+
+    pub fn discard(&mut self, cx: &mut Context<Self>) {
+        if let Some(grid) = self.grid_entity() {
+            grid.update(cx, |g, cx| {
+                g.delegate_mut().discard();
+                g.refresh(cx);
+                cx.notify();
+            });
+        }
+        self.error = None;
+        cx.notify();
+    }
+
+    /// Runs the pending changes in one transaction, then reloads. On a
+    /// failure everything is rolled back and the changes stay pending.
+    pub fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(grid), Some(target)) = (self.grid_entity(), self.edit_target()) else {
+            return;
+        };
+        let changes = grid.read(cx).delegate().changes();
+        if changes.is_empty() || self.committing {
+            return;
+        }
+        let Some(session) = self.data_sources.read(cx).session(self.node.connection) else {
+            self.error = Some("The data source is not connected.".into());
+            cx.notify();
+            return;
+        };
+        let statements: Vec<String> = changes.iter().map(|c| target.statement(c)).collect();
+        let shown = statements.clone();
+        let engine = target.engine;
+        self.committing = true;
+        // No edits while the commit runs: its success clears the buffer.
+        grid.update(cx, |g, _| {
+            let rows = g.delegate_mut();
+            rows.editable = false;
+            rows.editing = None;
+        });
+        let io = runtime::spawn(async move { Ok(session.transaction(engine, statements).await) });
+        self._load = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = session::join(io).await;
+            this.update_in(cx, |this, window, cx| {
+                this.committing = false;
+                if let Some(grid) = this.grid_entity() {
+                    grid.update(cx, |g, _| g.delegate_mut().editable = true);
+                }
+                match result {
+                    Ok(Ok(())) => {
+                        let n = shown.len();
+                        if let Some(grid) = this.grid_entity() {
+                            grid.update(cx, |g, _| g.delegate_mut().discard());
+                        }
+                        this.error = None;
+                        this.reload(cx);
+                        window.push_notification(
+                            Notification::success(format!(
+                                "Committed {n} change{}",
+                                if n == 1 { "" } else { "s" }
+                            )),
+                            cx,
+                        );
+                    }
+                    Ok(Err((ix, err))) => {
+                        this.error = Some(match ix {
+                            Some(ix) => format!(
+                                "Rolled back. Change {} failed: {err}\n{}",
+                                ix + 1,
+                                shown[ix]
+                            ),
+                            None => format!("Rolled back: {err}"),
+                        });
+                    }
+                    Err(err) => this.error = Some(err.to_string()),
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    fn show_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(sql) = self.review_sql(cx) else {
+            return;
+        };
+        let view = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, cx| {
+            let theme = cx.theme();
+            let view = view.clone();
+            alert
+                .title("Review changes")
+                .description(
+                    div()
+                        .id("review-sql")
+                        .max_h(px(360.))
+                        .overflow_y_scroll()
+                        .p_2()
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.background)
+                        .font_family("monospace")
+                        .text_sm()
+                        .text_color(theme.foreground)
+                        .children(sql.lines().map(|l| div().child(l.to_owned()))),
+                )
+                .show_cancel(true)
+                .ok_text("Commit")
+                .on_ok(move |_, window, cx| {
+                    view.update(cx, |v, cx| v.commit(window, cx)).ok();
+                    true
+                })
+        });
+    }
+
+    /// Starts over from the first page. Pending changes refer to loaded
+    /// rows, so they have to be committed or discarded first.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
+        if self
+            .grid_entity()
+            .is_some_and(|g| g.read(cx).delegate().has_changes())
+        {
+            self.error = Some("Commit or discard your changes first.".into());
+            cx.notify();
+            return;
+        }
         self.load_page(true, cx);
     }
 
@@ -563,7 +705,32 @@ impl DataView {
                     .text_color(theme.muted_foreground)
                     .child(count),
             )
+            .when_some(self.read_only, |bar, reason| {
+                bar.child(
+                    div()
+                        .px_1p5()
+                        .rounded(px(4.))
+                        .border_1()
+                        .border_color(theme.warning)
+                        .text_xs()
+                        .text_color(theme.warning)
+                        .child(reason),
+                )
+            })
             .child(div().flex_1())
+            .when(
+                self.read_only.is_none() && self.filter_column.is_some(),
+                |bar| {
+                    bar.child(
+                        Button::new("add-row")
+                            .ghost()
+                            .xsmall()
+                            .icon(Icon::new(IconName::Plus))
+                            .tooltip("Add a row")
+                            .on_click(cx.listener(|this, _, _, cx| this.add_row(cx))),
+                    )
+                },
+            )
             .when_some(self.filter_column.clone(), |bar, column| {
                 bar.child(div().w(px(150.)).child(Select::new(&column).xsmall()))
                     .child(
@@ -604,6 +771,55 @@ impl DataView {
                     .tooltip("Open this view's SQL in a console")
                     .on_click(cx.listener(|this, _, _, cx| this.open_in_console(cx))),
             )
+    }
+
+    fn render_pending(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let pending = self.pending(cx);
+        if pending == 0 {
+            return None;
+        }
+        let theme = cx.theme().clone();
+        Some(
+            h_flex()
+                .px_2()
+                .py_1()
+                .gap_2()
+                .bg(theme.warning.opacity(0.12))
+                .border_b_1()
+                .border_color(theme.border)
+                .text_sm()
+                .child(format!(
+                    "{pending} pending change{}",
+                    if pending == 1 { "" } else { "s" }
+                ))
+                .child(div().flex_1())
+                .child(
+                    Button::new("review-changes")
+                        .ghost()
+                        .xsmall()
+                        .label("Review SQL")
+                        .on_click(cx.listener(|this, _, window, cx| this.show_review(window, cx))),
+                )
+                .child(
+                    Button::new("discard-changes")
+                        .ghost()
+                        .xsmall()
+                        .label("Discard")
+                        .on_click(cx.listener(|this, _, _, cx| this.discard(cx))),
+                )
+                .child(
+                    Button::new("commit-changes")
+                        .primary()
+                        .xsmall()
+                        .label(if self.committing {
+                            "Committing…"
+                        } else {
+                            "Commit"
+                        })
+                        .disabled(self.committing)
+                        .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
+                ),
+        )
     }
 
     fn render_filters(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -670,6 +886,7 @@ impl Render for DataView {
             .size_full()
             .child(self.render_toolbar(cx))
             .children(self.render_filters(cx))
+            .children(self.render_pending(cx))
             .when_some(self.error.clone(), |el, err| {
                 el.child(
                     div()
@@ -681,26 +898,5 @@ impl Render for DataView {
                 )
             })
             .child(div().flex_1().min_h_0().child(body))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_numeric_type;
-
-    #[test]
-    fn numeric_types() {
-        for t in [
-            "integer",
-            "bigint",
-            "numeric(10,2)",
-            "double precision",
-            "int unsigned",
-        ] {
-            assert!(is_numeric_type(t), "{t}");
-        }
-        for t in ["text", "interval", "timestamp with time zone", "point"] {
-            assert!(!is_numeric_type(t), "{t}");
-        }
     }
 }
