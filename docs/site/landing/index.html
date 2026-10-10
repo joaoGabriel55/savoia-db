@@ -256,6 +256,17 @@ h2 {
 .thumbs .crop img { position: absolute; width: 230%; max-width: none; left: var(--x); top: var(--y); }
 .thumbs span { display: block; padding: 8px 10px; }
 
+/* Engines: what works today and what is coming */
+.engines { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: clamp(24px, 4vw, 56px); }
+.engines li { padding: 20px 0 22px; border-top: 1px solid var(--rule); }
+.engines b { display: block; font: 700 clamp(1.4rem, 2.2vw, 1.9rem)/1.1 var(--display); font-stretch: 112%; letter-spacing: -0.02em; color: var(--ink); }
+.engines .state { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; color: var(--ink-header); }
+.engines .state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--status, #3DB9AE); }
+.engines .soon .state { --status: #9B8CE8; }
+.engines .soon b { color: var(--ink-header); }
+.engines-note { margin: 20px 0 0; color: var(--ink-muted); font-size: 14px; max-width: 70ch; }
+.engines-note a { color: var(--ink-header); }
+
 /* Free, and staying free: the receipt */
 .support { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(32px, 6vw, 96px); align-items: center; }
 .support .note p { color: var(--ink-header); max-width: 54ch; }
@@ -324,6 +335,7 @@ footer a:hover { text-decoration: underline; }
   .downloads th, .downloads td { border: 0 !important; padding: 0; width: auto; }
   .downloads tr:last-child { border-bottom: 1px solid var(--rule); }
   .thumbs { grid-template-columns: 1fr 1fr; }
+  .engines { grid-template-columns: 1fr 1fr; }
   .thumbs a:last-child { display: none; }
   .actions .btn { flex: 1 1 100%; justify-content: center; }
   .window-note { display: none; }
@@ -351,7 +363,7 @@ footer a:hover { text-decoration: underline; }
 
       <div class="offer">
         <h1>The database client that costs nothing and asks for nothing.</h1>
-        <p class="lede">Savoia Studio is a desktop app for <strong>PostgreSQL</strong> and <strong>MySQL</strong>, written in Rust and drawn on the GPU. No webview, no JVM. It opens fast and stays out of your way.</p>
+        <p class="lede">Savoia Studio is a desktop app for <strong>PostgreSQL</strong> and <strong>MySQL</strong>, written in Rust and drawn on the GPU. No webview, no JVM. It opens fast and stays out of your way. <a href="#engines">More databases are coming soon.</a></p>
 
         <ul class="ledger" aria-label="What you will not need">
           <li><span class="item">Free trial</span><span class="none">none, it's simply free</span></li>
@@ -482,6 +494,24 @@ footer a:hover { text-decoration: underline; }
           <a href="docs/data-view.html"><span class="crop" style="--x:-52%;--y:-6%"><img src="docs/media/data-view.webp" width="2000" height="1265" loading="lazy" alt="The data view of the players table."></span><span>Data view</span></a>
         </div>
       </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="engines">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2 id="engines">More databases are on the way.</h2>
+        <p>Savoia speaks PostgreSQL and MySQL today. Support for more engines is coming soon, and it will be free like everything else.</p>
+      </div>
+      <ul class="engines">
+        <li><b>PostgreSQL</b><span class="state">Supported</span></li>
+        <li><b>MySQL</b><span class="state">Supported</span></li>
+        <li class="soon"><b>MariaDB</b><span class="state">Works through MySQL today; dedicated support coming</span></li>
+        <li class="soon"><b>SQLite</b><span class="state">Coming soon</span></li>
+        <li class="soon"><b>SQL Server</b><span class="state">Coming soon</span></li>
+        <li class="soon"><b>MongoDB</b><span class="state">Coming soon</span></li>
+      </ul>
+      <p class="engines-note">Want one sooner, or one that isn't listed? <a href="https://github.com/joaoGabriel55/savoia-studio/issues">Say so on GitHub</a>.</p>
     </div>
   </section>
 

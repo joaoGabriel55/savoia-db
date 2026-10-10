@@ -22,6 +22,21 @@
 - Dump and import whole schemas or single tables, with your installed client tools or the built-in engine.
 - Connect through SSH tunnels and over TLS.
 
+## Coming soon
+
+Savoia speaks PostgreSQL and MySQL today. Support for more databases is on the way, free like everything else:
+
+| Database | Status |
+| --- | --- |
+| PostgreSQL | Supported |
+| MySQL | Supported |
+| MariaDB | Works through a MySQL connection today; dedicated support coming |
+| SQLite | Coming soon |
+| SQL Server | Coming soon |
+| MongoDB | Coming soon |
+
+Want one sooner, or one that isn't listed? [Say so on GitHub](https://github.com/joaoGabriel55/savoia-studio/issues).
+
 ## Start here
 
 <ul class="paths">
