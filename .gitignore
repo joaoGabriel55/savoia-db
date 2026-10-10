@@ -13,3 +13,4 @@ target/
 .claude/skills/impeccable/scripts/bin/
 .agents/skills/impeccable/scripts/bin/
 .github/skills/impeccable/scripts/bin/
+/docs/site/book

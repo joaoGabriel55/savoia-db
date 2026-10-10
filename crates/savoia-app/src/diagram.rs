@@ -422,7 +422,7 @@ impl ErDiagram {
         let s = |v: f32| px(v * z);
         let focused = self.node.table.as_deref() == Some(table.name.as_str());
         let border = if focused {
-            theme::c(theme::IVREA_LINE)
+            cx.theme().ring
         } else {
             theme.border
         };

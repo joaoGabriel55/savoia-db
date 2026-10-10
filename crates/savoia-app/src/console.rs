@@ -236,7 +236,7 @@ impl QueryConsole {
         &self.editor
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench"))]
     pub fn results(&self) -> Vec<Entity<TableState<ResultSet>>> {
         self.results.iter().map(|tab| tab.table.clone()).collect()
     }
@@ -728,7 +728,7 @@ impl QueryConsole {
                 .cursor_pointer()
                 .border_b_2()
                 .border_color(if selected {
-                    theme::c(theme::IVREA_LINE)
+                    cx.theme().ring
                 } else {
                     transparent_black()
                 })

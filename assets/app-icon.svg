@@ -1,9 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Savoia Studio: the crowned Savoy shield (white cross on red, Savoy-blue
+       border) on an Ivrea-green field, after the Kingdom of Italy's flag. -->
+  <defs>
+    <path id="shield" d="M300 410H724V632C724 748 632 820 512 868C392 820 300 748 300 632Z"/>
+    <clipPath id="inner">
+      <use href="#shield" transform="translate(512 640) scale(0.82) translate(-512 -640)"/>
+    </clipPath>
+  </defs>
   <rect width="1024" height="1024" rx="224" fill="#1F5A43"/>
-  <g fill="none" stroke="#F2EFE8" stroke-width="56">
-    <ellipse cx="512" cy="310" rx="250" ry="90"/>
-    <path d="M262 310v404c0 50 112 90 250 90s250-40 250-90V310"/>
-    <path d="M262 512c0 50 112 90 250 90s250-40 250-90"/>
+
+  <!-- Crown -->
+  <g fill="#D9A93B" stroke="#8A6516" stroke-width="10" stroke-linejoin="round">
+    <path d="M356 372L334 250L410 318L446 226L490 306L512 196L534 306L578 226L614 318L690 250L668 372Z"/>
+    <rect x="348" y="356" width="328" height="44" rx="12"/>
+    <circle cx="334" cy="242" r="20"/>
+    <circle cx="446" cy="218" r="20"/>
+    <circle cx="578" cy="218" r="20"/>
+    <circle cx="690" cy="242" r="20"/>
+    <path d="M512 112V176M486 140H538" fill="none" stroke-width="20" stroke-linecap="round" stroke="#D9A93B"/>
+    <circle cx="512" cy="188" r="20"/>
   </g>
-  <circle cx="760" cy="760" r="110" fill="#1F64B4"/>
+  <g fill="#8A6516">
+    <circle cx="430" cy="378" r="10"/>
+    <circle cx="512" cy="378" r="10"/>
+    <circle cx="594" cy="378" r="10"/>
+  </g>
+
+  <!-- Shield -->
+  <use href="#shield" fill="#1F64B4"/>
+  <g clip-path="url(#inner)">
+    <rect x="280" y="380" width="464" height="520" fill="#C8323C"/>
+    <rect x="474" y="380" width="76" height="520" fill="#F2EFE8"/>
+    <rect x="280" y="566" width="464" height="76" fill="#F2EFE8"/>
+  </g>
 </svg>

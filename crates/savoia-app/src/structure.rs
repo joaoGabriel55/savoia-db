@@ -278,7 +278,7 @@ impl Render for StructureView {
                 .cursor_pointer()
                 .border_b_2()
                 .border_color(if selected {
-                    crate::theme::c(crate::theme::IVREA_LINE)
+                    cx.theme().ring
                 } else {
                     transparent_black()
                 })

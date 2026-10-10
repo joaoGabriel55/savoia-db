@@ -388,7 +388,7 @@ impl TableDelegate for DataRows {
             return h_flex()
                 .size_full()
                 .border_1()
-                .border_color(theme::c(theme::IVREA_LINE))
+                .border_color(cx.theme().ring)
                 .bg(theme.background)
                 .child(
                     // The input sizes to its container; without a flex
@@ -412,7 +412,7 @@ impl TableDelegate for DataRows {
         let ink = if deleted {
             muted
         } else if column.base.is_none() {
-            theme::related_ink()
+            theme::related_ink(cx)
         } else {
             theme.foreground
         };

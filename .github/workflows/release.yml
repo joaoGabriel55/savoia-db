@@ -1,0 +1,132 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds every installer, signs what can be signed,
+# and publishes them with latest.json (the updater manifest) to a draft
+# GitHub Release. Review the draft, then publish it. See docs/RELEASING.md.
+#
+# Pull requests that touch packaging build every installer too, unsigned and
+# unpublished, so a broken platform shows up before the tag does.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "crates/savoia-app/Cargo.toml"
+      - "Cargo.toml"
+      - "assets/icons/**"
+      - "scripts/release-manifest.py"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-aarch64, os: macos-14, formats: "app,dmg", arch: aarch64 }
+          - { name: macos-x86_64, os: macos-15-intel, formats: "app,dmg", arch: x86_64 }
+          - { name: windows-x86_64, os: windows-latest, formats: "nsis,wix", arch: x86_64 }
+          - { name: linux-x86_64, os: ubuntu-22.04, formats: "deb,appimage", arch: x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          cargo install cargo-packager --version 0.11.8 --locked
+          if [ "$RUNNER_OS" = Linux ]; then
+            # linuxdeploy, which builds the AppImage, is itself an AppImage.
+            sudo apt-get install -y libfuse2
+            cargo install cargo-generate-rpm --version 0.21.0 --locked
+          fi
+      - name: Check the tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="savoia-app"))')
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != crate $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Package
+        working-directory: crates/savoia-app
+        shell: bash
+        # Unset secrets arrive as empty strings, which cargo-packager would
+        # take as "sign with this". Export only the ones that are set; the
+        # rest stay absent and that step is skipped (macOS signing until the
+        # APPLE_* secrets exist). Pull requests get none.
+        env:
+          IN_CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          IN_CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+          IN_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          IN_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IN_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          IN_APPLE_ID: ${{ secrets.APPLE_ID }}
+          IN_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          IN_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in CARGO_PACKAGER_SIGN_PRIVATE_KEY \
+            CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            value="$(printenv "IN_$name" || true)"
+            if [ -n "$value" ]; then export "$name=$value"; fi
+            unset "IN_$name"
+          done
+          # Releases can update themselves; pull-request builds can't.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" \
+              || { echo "::error::CARGO_PACKAGER_SIGN_PRIVATE_KEY is unset; see docs/RELEASING.md"; exit 1; }
+            export SAVOIA_UPDATER_PUBKEY="$(cat updater.pub)"
+          fi
+          cargo packager --release --formats ${{ matrix.formats }}
+      - name: RPM
+        if: runner.os == 'Linux'
+        run: cargo generate-rpm -p crates/savoia-app -o target/packages/
+      - name: Name the assets
+        shell: bash
+        working-directory: target/packages
+        run: |
+          # GitHub turns spaces in asset names into dots; settle names here
+          # so latest.json and the uploads agree. The .app.tar.gz carries no
+          # architecture of its own.
+          VERSION=${VERSION:-dev}
+          for f in *.app.tar.gz *.app.tar.gz.sig; do
+            [ -e "$f" ] && mv "$f" "savoia-studio_${VERSION}_${{ matrix.arch }}${f#Savoia Studio}"
+          done
+          for f in *; do
+            [ -f "$f" ] && [ "$f" != "${f// /-}" ] && mv "$f" "$(echo "${f// /-}" | tr '[:upper:]' '[:lower:]')"
+          done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            target/packages/*.*
+            !target/packages/*.app
+
+  publish:
+    name: Draft the release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Updater manifest
+        run: python3 scripts/release-manifest.py "${GITHUB_REF_NAME#v}" "$GITHUB_REF_NAME" dist > dist/latest.json
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag \
+            --title "Savoia Studio ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md

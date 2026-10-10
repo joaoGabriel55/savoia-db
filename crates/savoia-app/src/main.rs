@@ -1,7 +1,11 @@
 mod assets;
+#[cfg(feature = "bench")]
+mod bench;
+mod commands;
 mod completion;
 mod connection_form;
 mod console;
+mod crash;
 mod data_grid;
 mod data_pickers;
 mod data_sources;
@@ -15,25 +19,30 @@ mod relations;
 mod results;
 mod runtime;
 mod session;
+mod settings;
+mod settings_view;
 mod structure;
 mod table_menu;
 mod theme;
 mod transfer;
 #[cfg(test)]
 mod ui_tests;
+mod updates;
 mod workspace;
 
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 fn main() {
+    crash::install();
     gpui_kit::application()
         .with_assets(assets::AppAssets)
         .run(|cx| {
             gpui_kit::init(cx);
-            theme::apply(cx);
+            // The saved appearance replaces this once the store is open.
+            theme::apply(theme::Appearance::System, cx);
             console::init(cx);
-            workspace::init(cx);
+            commands::init(cx);
 
             let bounds = Bounds::centered(None, size(px(1360.), px(860.)), cx);
             let options = WindowOptions {
@@ -41,10 +50,42 @@ fn main() {
                 window_min_size: Some(size(px(900.), px(560.))),
                 ..TitleBar::window_options()
             };
+            #[cfg(feature = "bench")]
+            if let Some(bench) = bench::from_env() {
+                return run_bench(bench, options, cx);
+            }
             gpui_kit::open_window(options, cx, |window, cx| {
                 cx.new(|cx| workspace::Workspace::new(window, cx))
             })
             .expect("failed to open the main window");
             cx.activate(true);
         });
+}
+
+#[cfg(feature = "bench")]
+fn run_bench(bench: bench::Bench, options: WindowOptions, cx: &mut App) {
+    match bench {
+        // The real startup path, store and all.
+        bench::Bench::Startup => {
+            gpui_kit::open_window(options, cx, |window, cx| {
+                bench::after_first_frame(window, bench::report_startup);
+                cx.new(|cx| workspace::Workspace::new(window, cx))
+            })
+            .expect("window");
+        }
+        bench::Bench::Scroll => {
+            let data_sources = bench::data_sources(cx);
+            let ds = data_sources.clone();
+            let (window, workspace) = gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| workspace::Workspace::with_data_sources(ds, window, cx))
+            })
+            .expect("window");
+            window
+                .update(cx, |_, window, cx| {
+                    bench::scroll(workspace, data_sources, window, cx)
+                })
+                .expect("window");
+        }
+    }
+    cx.activate(true);
 }

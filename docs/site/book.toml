@@ -1,0 +1,12 @@
+[book]
+title = "Savoia Studio"
+description = "A native database client for PostgreSQL and MySQL."
+authors = ["Gabriel Quaresma"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/joaoGabriel55/savoia-studio"
+edit-url-template = "https://github.com/joaoGabriel55/savoia-studio/edit/main/docs/site/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"

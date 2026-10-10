@@ -1,6 +1,15 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <img alt="Savoia Studio" src="assets/logo.svg" width="420">
+</picture>
+
 # Savoia Studio
 
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/O5I528IC3A)
+
 A lightweight but feature-rich desktop database client for PostgreSQL and MySQL. 100% Rust, with a native GPU-rendered UI built on [GPUI Kit](https://gpui-kit.com). No webview.
+
+**[Download](https://github.com/joaoGabriel55/savoia-studio/releases/latest)** for macOS, Windows or Linux · **[Documentation](https://joaogabriel55.github.io/savoia-studio/)**
 
 See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/adr/](docs/adr/README.md) for architecture decisions.
 
@@ -14,6 +23,8 @@ See [docs/PLAN.md](docs/PLAN.md) for the roadmap and [docs/adr/](docs/adr/README
 | `crates/savoia-mysql` | MySQL/MariaDB driver (mysql_async, rustls) |
 | `crates/savoia-store` | Saved connections (SQLite) and secrets (a user-only `0600` file) |
 | `crates/savoia-tunnel` | SSH tunnels (russh) with known_hosts verification |
+| `crates/savoia-transfer` | Dump and import: external client tools and the built-in engine |
+| `docs/site` | The user documentation (mdBook), published to GitHub Pages |
 
 ## Prerequisites
 
@@ -54,6 +65,10 @@ SAVOIA_SSH_TEST=1 cargo test --workspace
 ```
 
 
+### Benchmarks
+
+`scripts/bench.sh startup` and `scripts/bench.sh scroll` (with `SAVOIA_PG_URL`) measure the release budgets in a real window. Results are in [docs/benchmarks/](docs/benchmarks/).
+
 ### Sample data
 
 `samples/` has a Serie A 2025-26 database for trying the explorer, ER diagram and console by hand. Clubs and stadiums are real (figures approximate); every person is invented. It has 20 clubs, 490 players, 380 fixtures (20 matchdays played, so later scores are `NULL`), views, a function, a procedure, and 150,000 `match_events` rows for paging and cancel.
@@ -70,3 +85,11 @@ To change the data, edit `samples/generate_serie_a.py` and run it; it rewrites b
 - Colors come from `crates/savoia-app/src/theme.rs`; don't hard-code colors in views.
 - Lucide icons beyond the default component set must be added to `crates/savoia-app/src/assets.rs`, otherwise they render blank.
 - Only `savoia-app` depends on `gpui-kit`. Keep database, dump and storage logic in UI-free crates.
+
+## Releasing
+
+Push a `v*` tag; see [docs/RELEASING.md](docs/RELEASING.md).
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.

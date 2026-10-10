@@ -1,8 +1,10 @@
 //! Main window: title bar, explorer | console and diagram tabs, status bar. Also turns
-//! data-source events into notifications and the host-key trust and password prompts.
+//! data-source events into notifications and the host-key trust and password prompts,
+//! and runs the app-wide commands (palette, settings, tabs, theme, updates).
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::command::{Command, CommandItem, CommandState};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
@@ -16,22 +18,25 @@ use gpui_kit::*;
 use savoia_core::ConnectionId;
 use savoia_tunnel::HostKeyPolicy;
 
+pub use crate::commands::NewConsole;
+use crate::commands::{
+    self, CheckForUpdates, CloseTab, CommandPalette, NextTab, OpenDocs, OpenSettings, PreviousTab,
+    Quit, ReportIssue, SupportOnKofi, UseDarkAppearance, UseLightAppearance, UseSystemAppearance,
+};
 use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, DataSourcesEvent, SourceState};
 use crate::data_view::{DataView, DataViewEvent};
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
 use crate::memory::MemoryMeter;
+use crate::settings::{self, prefs};
+use crate::settings_view::SettingsView;
 use crate::structure::StructureView;
-use crate::theme;
+use crate::theme::{self, Appearance};
 use crate::transfer::{Direction, TransferView};
+use crate::updates::{self, Check};
+use crate::{crash, runtime};
 use savoia_core::data_query::Filter;
-
-actions!(workspace, [NewConsole]);
-
-pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("secondary-t", NewConsole, None)]);
-}
 
 /// A tab of the main area, in opening order.
 enum Page {
@@ -40,6 +45,7 @@ enum Page {
     Structure(Entity<StructureView>),
     Data(Entity<DataView>),
     Transfer(Entity<TransferView>),
+    Settings(Entity<SettingsView>),
 }
 
 pub struct Workspace {
@@ -49,6 +55,9 @@ pub struct Workspace {
     /// Index into `pages`; meaningless while it's empty.
     active: usize,
     memory: Entity<MemoryMeter>,
+    /// Where palette commands are dispatched from when nothing inside the
+    /// workspace has focus.
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -57,6 +66,10 @@ impl Workspace {
         let data_sources = crate::data_sources::init(cx);
         let mut this = Self::with_data_sources(data_sources, window, cx);
         this.dev_restore(window, cx);
+        this.offer_crash_report(window, cx);
+        if prefs(cx).check_updates {
+            this.check_for_updates(false, window, cx);
+        }
         this
     }
 
@@ -128,8 +141,15 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        settings::init(&data_sources, cx);
         let explorer = cx.new(|cx| Explorer::new(data_sources.clone(), cx));
         let subscriptions = vec![
+            // "Match system" keeps following the OS while the app is open.
+            cx.observe_window_appearance(window, |_, _, cx| {
+                if prefs(cx).appearance == Appearance::System {
+                    theme::apply(Appearance::System, cx);
+                }
+            }),
             cx.observe(&explorer, |_, _, cx| cx.notify()),
             cx.observe(&data_sources, |_, _, cx| cx.notify()),
             cx.subscribe_in(&data_sources, window, Self::on_data_source_event),
@@ -139,12 +159,16 @@ impl Workspace {
             pages: Vec::new(),
             active: 0,
             memory: cx.new(MemoryMeter::new),
+            focus: cx.focus_handle(),
             data_sources,
             explorer,
             _subscriptions: subscriptions,
         };
         // The first console follows the explorer's selection until it runs.
         this.open_console(None, window, cx);
+        // Keys and menu commands go up from the focused element; with
+        // nothing focused they would never reach the workspace.
+        window.focus(&this.focus, cx);
         this
     }
 
@@ -197,6 +221,14 @@ impl Workspace {
             Page::Console(console) => Some(console),
             _ => None,
         })
+    }
+
+    #[cfg(test)]
+    pub fn settings_tabs(&self) -> usize {
+        self.pages
+            .iter()
+            .filter(|page| matches!(page, Page::Settings(_)))
+            .count()
     }
 
     fn active_console(&self) -> Option<&Entity<QueryConsole>> {
@@ -420,6 +452,183 @@ impl Workspace {
         }
     }
 
+    /// Opens the Settings tab, or brings it forward.
+    pub fn open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
+        let open = self
+            .pages
+            .iter()
+            .position(|page| matches!(page, Page::Settings(_)));
+        self.active = match open {
+            Some(i) => i,
+            None => {
+                let data_sources = self.data_sources.clone();
+                self.pages
+                    .push(Page::Settings(cx.new(|_| SettingsView::new(data_sources))));
+                self.pages.len() - 1
+            }
+        };
+        cx.notify();
+    }
+
+    fn close_active(&mut self, _: &CloseTab, _: &mut Window, cx: &mut Context<Self>) {
+        self.close(self.active, cx);
+    }
+
+    fn next_tab(&mut self, _: &NextTab, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.pages.is_empty() {
+            self.active = (self.active + 1) % self.pages.len();
+            cx.notify();
+        }
+    }
+
+    fn previous_tab(&mut self, _: &PreviousTab, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.pages.is_empty() {
+            self.active = (self.active + self.pages.len() - 1) % self.pages.len();
+            cx.notify();
+        }
+    }
+
+    /// Opens the command palette over the window. A confirmed command is
+    /// dispatched from the workspace once the dialog closes: from the dialog
+    /// itself it would never reach the workspace's handlers.
+    pub fn open_palette(
+        &mut self,
+        _: &CommandPalette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let state = cx.new(|cx| CommandState::new(window, cx));
+        let commands = commands::commands();
+        let workspace_focus = self.focus.clone();
+        let palette = state.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let actions: Vec<Box<dyn Action>> = commands.iter().map(|c| (c.action)()).collect();
+            let items = commands.iter().map(|c| {
+                CommandItem::new()
+                    .label(c.label)
+                    .icon(c.icon.clone())
+                    .keywords(c.keywords.iter().copied())
+                    .action((c.action)())
+            });
+            let focus = workspace_focus.clone();
+            dialog.w(px(520.)).p_0().close_button(false).child(
+                Command::new(&palette)
+                    .items(items)
+                    .bordered(false)
+                    .placeholder("Type a command…")
+                    .on_confirm(move |ix, window, cx| {
+                        let Some(action) = actions.get(ix.row) else {
+                            return;
+                        };
+                        let action = action.boxed_clone();
+                        window.close_dialog(cx);
+                        if window.focused(cx).is_none() {
+                            window.focus(&focus, cx);
+                        }
+                        window.dispatch_action(action, cx);
+                    })
+                    .on_cancel(|window, cx| window.close_dialog(cx)),
+            )
+        });
+        // After opening: the dialog takes focus for itself when it opens.
+        state.update(cx, |state, cx| state.focus(window, cx));
+    }
+
+    fn use_appearance(appearance: Appearance, cx: &mut App) {
+        settings::set_appearance(appearance, cx);
+    }
+
+    fn check_updates_action(
+        &mut self,
+        _: &CheckForUpdates,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.check_for_updates(true, window, cx);
+    }
+
+    /// Asks GitHub Releases for a newer version and offers to install it.
+    /// A startup check (`manual` false) stays silent unless there is one.
+    fn check_for_updates(&mut self, manual: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !updates::enabled() {
+            if manual {
+                window.push_notification(
+                    Notification::info("This build can't update itself. Download new versions from GitHub Releases.")
+                        .id::<UpdateNotice>(),
+                    cx,
+                );
+            }
+            return;
+        }
+        let check = runtime::spawn_blocking(updates::check);
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(result) = check.await else {
+                return;
+            };
+            this.update_in(cx, |_, window, cx| match result {
+                Ok(Check::Available(update)) => {
+                    let version = update.version.clone();
+                    let update = std::sync::Arc::new(*update);
+                    window.push_notification(
+                        Notification::info(format!("Savoia Studio {version} is available."))
+                            .id::<UpdateNotice>()
+                            .title("Update available")
+                            .action(move |_, _, _| {
+                                let update = update.clone();
+                                Button::new("install-update")
+                                    .small()
+                                    .primary()
+                                    .label("Install and restart")
+                                    .on_click(move |_, window, cx| {
+                                        install_update(update.clone(), window, cx)
+                                    })
+                            }),
+                        cx,
+                    );
+                }
+                Ok(Check::UpToDate) if manual => window.push_notification(
+                    Notification::success(format!(
+                        "Savoia Studio {} is the latest version.",
+                        env!("CARGO_PKG_VERSION")
+                    ))
+                    .id::<UpdateNotice>(),
+                    cx,
+                ),
+                Err(error) if manual => window.push_notification(
+                    Notification::error(format!("Couldn't check for updates: {error}"))
+                        .id::<UpdateNotice>(),
+                    cx,
+                ),
+                _ => {}
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// If the last run crashed and the user opted in, offers to open a
+    /// prefilled GitHub issue.
+    fn offer_crash_report(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(report) = crash::take_pending(prefs(cx).crash_reports) else {
+            return;
+        };
+        let url = crash::issue_url(&report);
+        window.push_notification(
+            Notification::warning(
+                "Savoia Studio closed unexpectedly last time. You can review the report on GitHub before sending it.",
+            )
+            .title("Crash report")
+            .action(move |_, _, _| {
+                let url = url.clone();
+                Button::new("report-crash")
+                    .small()
+                    .label("Review report…")
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+            }),
+            cx,
+        );
+    }
+
     /// Asks for the database password of `id`, then connects with it.
     fn ask_password(
         &mut self,
@@ -512,8 +721,8 @@ impl Render for Workspace {
                 .gap_2()
                 .text_sm()
                 .child(
-                    // The app icon's mark, without its blue dot: Run stays the
-                    // window's only Savoy blue.
+                    // A database glyph on green, not the app icon's shield:
+                    // its red and blue would break the Run-only blue rule.
                     h_flex()
                         .size(px(16.))
                         .rounded(px(4.))
@@ -592,6 +801,9 @@ impl Render for Workspace {
                             .label(view.title())
                             .prefix(Icon::new(icon).small().ml_2().text_color(color))
                     }
+                    Page::Settings(_) => Tab::new()
+                        .label("Settings")
+                        .prefix(Icon::new(Lucide::Settings).small().ml_2().text_color(muted)),
                     Page::Structure(view) => Tab::new().label(view.read(cx).title()).prefix(
                         Icon::new(Lucide::TableProperties)
                             .small()
@@ -620,6 +832,7 @@ impl Render for Workspace {
             Some(Page::Structure(view)) => view.clone().into_any_element(),
             Some(Page::Data(view)) => view.clone().into_any_element(),
             Some(Page::Transfer(view)) => view.clone().into_any_element(),
+            Some(Page::Settings(view)) => view.clone().into_any_element(),
             None => v_flex()
                 .size_full()
                 .items_center()
@@ -683,12 +896,37 @@ impl Render for Workspace {
                 h_flex()
                     .gap_3()
                     .child(self.memory.clone())
-                    .child(div().text_xs().text_color(muted).child("SQL · UTF-8")),
+                    .child(div().text_xs().text_color(muted).child("SQL · UTF-8"))
+                    .child(
+                        Button::new("kofi")
+                            .ghost()
+                            .xsmall()
+                            .icon(Icon::new(Lucide::Coffee))
+                            .label("Support me on Ko-fi")
+                            .tooltip("Savoia Studio is free. Buy the author a coffee.")
+                            .on_click(|_, _, cx| cx.open_url(commands::KOFI_URL)),
+                    ),
             );
 
         v_flex()
             .size_full()
+            .track_focus(&self.focus)
             .on_action(cx.listener(Self::new_console))
+            .on_action(cx.listener(Self::open_palette))
+            .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::close_active))
+            .on_action(cx.listener(Self::next_tab))
+            .on_action(cx.listener(Self::previous_tab))
+            .on_action(cx.listener(Self::check_updates_action))
+            .on_action(|_: &UseSystemAppearance, _, cx| {
+                Self::use_appearance(Appearance::System, cx)
+            })
+            .on_action(|_: &UseLightAppearance, _, cx| Self::use_appearance(Appearance::Light, cx))
+            .on_action(|_: &UseDarkAppearance, _, cx| Self::use_appearance(Appearance::Dark, cx))
+            .on_action(|_: &OpenDocs, _, cx| cx.open_url(commands::DOCS_URL))
+            .on_action(|_: &ReportIssue, _, cx| cx.open_url(crash::ISSUES_URL))
+            .on_action(|_: &SupportOnKofi, _, cx| cx.open_url(commands::KOFI_URL))
+            .on_action(|_: &Quit, _, cx| cx.quit())
             .bg(theme.background)
             .text_color(theme.foreground)
             .child(title_bar)
@@ -706,4 +944,38 @@ impl Render for Workspace {
             )
             .child(status)
     }
+}
+
+/// Keys the update notifications, so each step replaces the one before.
+struct UpdateNotice;
+
+/// Downloads and installs on the I/O runtime, then restarts into the new
+/// version. Failures land in a notification; the running app is untouched.
+fn install_update(
+    update: std::sync::Arc<cargo_packager_updater::Update>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.push_notification(
+        Notification::info("Downloading the update…")
+            .id::<UpdateNotice>()
+            .autohide(false),
+        cx,
+    );
+    let install = runtime::spawn_blocking(move || updates::install(&update));
+    window
+        .spawn(cx, async move |cx| {
+            let result = install.await.map_err(|e| e.to_string()).and_then(|r| r);
+            cx.update(|window, cx| match result {
+                Ok(()) => cx.restart(),
+                Err(error) => window.push_notification(
+                    Notification::error(format!("The update failed: {error}"))
+                        .id::<UpdateNotice>()
+                        .autohide(false),
+                    cx,
+                ),
+            })
+            .ok();
+        })
+        .detach();
 }
