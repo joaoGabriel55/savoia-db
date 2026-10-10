@@ -3,7 +3,7 @@
 The work still missing from [PLAN.md](./PLAN.md), split into tasks small enough to ship one per PR.
 Each task lists where it lives, what "done" means, and a rough estimate for one developer.
 
-Status as of 2026-10-09: M0–M3 are done. M4 and M5 have not started.
+Status as of 2026-10-09: M0–M3 are done. M4 is in progress; M5 has not started.
 
 Legend: **[ ]** open · **[~]** partly done · **[x]** done
 
@@ -43,11 +43,11 @@ A no-SQL view per table that browses, edits and queries data, joins included. Se
 
 ## Now: M4 (Dump and import), about 3 weeks
 
-Needs the `savoia-transfer` crate, which does not exist yet. The Export… and Import… menu items are already in place, disabled and tagged M4.
+Lives in the `savoia-transfer` crate. Tools are detected, not bundled: see the [ADR](./adr/202610092308-detect-installed-dump-tools-instead-of-bundling-them.md). The Export… and Import… menu items are already in place, disabled and tagged M4.
 
 | # | Task |
 |---|------|
-| 4.1 | [ ] Tool detection: find `pg_dump`/`pg_restore`/`psql`/`mysqldump`/`mysql` on PATH or a custom path; check version against the server. |
+| 4.1 | [x] Tool detection: find `pg_dump`/`pg_restore`/`psql`/`mysqldump`/`mysql` on PATH or a custom path; check version against the server. |
 | 4.2 | [ ] External runner: pass secrets through 0600 temp files (`PGPASSFILE`, `--defaults-extra-file`), parse progress, cancel, show the log. |
 | 4.3 | [ ] Built-in exporter: DDL from the catalog plus data to `.sql`, `.sql.gz`, CSV. |
 | 4.4 | [ ] Import: SQL file runner (reuses the 2.2 splitter; handles `$$`, `DELIMITER`, comments), CSV import with column mapping. |
@@ -71,7 +71,6 @@ These need an ADR before the task that depends on them starts.
 
 | Decision | Blocks |
 |----------|--------|
-| Bundle `pg_dump`/`mysqldump` per OS, or only detect them | 4.1 |
 | Packaging and updater tool (Tauri is gone) | 5.4 |
 | License and distribution channel | 5.5 |
 
