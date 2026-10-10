@@ -117,6 +117,8 @@ pub enum ExplorerEvent {
     ShowDiagram(NodeRef),
     /// Open the structure of a table or view; the node has a table.
     ShowStructure(NodeRef),
+    /// Browse a table's or view's rows; the node has a table.
+    OpenData(NodeRef),
     /// SQL for a query console on `connection`.
     Sql {
         connection: ConnectionId,
@@ -620,7 +622,11 @@ impl Explorer {
             refresh: false,
         };
         match action {
-            TableAction::OpenData => cx.emit(sql(object.select_sql(), true)),
+            TableAction::OpenData => {
+                if let Some(node) = self.nodes.get(&row).cloned() {
+                    cx.emit(ExplorerEvent::OpenData(node));
+                }
+            }
             TableAction::NewSelect => cx.emit(sql(object.select_sql(), false)),
             TableAction::ShowDiagram => {
                 if let Some(node) = self.nodes.get(&row).cloned() {

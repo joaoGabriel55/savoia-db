@@ -18,6 +18,7 @@ use savoia_tunnel::HostKeyPolicy;
 
 use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, DataSourcesEvent, SourceState};
+use crate::data_view::{DataView, DataViewEvent};
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, ExplorerEvent, NodeRef};
 use crate::memory::MemoryMeter;
@@ -35,6 +36,7 @@ enum Page {
     Console(Entity<QueryConsole>),
     Diagram(Entity<ErDiagram>),
     Structure(Entity<StructureView>),
+    Data(Entity<DataView>),
 }
 
 pub struct Workspace {
@@ -206,6 +208,36 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Opens the data view of `node`'s table, or brings its tab forward.
+    pub fn open_data(&mut self, node: NodeRef, window: &mut Window, cx: &mut Context<Self>) {
+        let open = self.pages.iter().position(|page| match page {
+            Page::Data(view) => view.read(cx).shows(&node),
+            _ => false,
+        });
+        self.active = match open {
+            Some(i) => i,
+            None => {
+                let data_sources = self.data_sources.clone();
+                let view = cx.new(|cx| DataView::new(data_sources, node, window, cx));
+                cx.subscribe_in(
+                    &view,
+                    window,
+                    |this, _, event: &DataViewEvent, window, cx| {
+                        let DataViewEvent::Sql { connection, sql } = event;
+                        let console = this.console_for(*connection, window, cx);
+                        console.update(cx, |c, cx| c.insert_sql(sql, false, window, cx));
+                        cx.notify();
+                    },
+                )
+                .detach();
+                cx.observe(&view, |_, _, cx| cx.notify()).detach();
+                self.pages.push(Page::Data(view));
+                self.pages.len() - 1
+            }
+        };
+        cx.notify();
+    }
+
     fn on_explorer_event(
         &mut self,
         _: &Entity<Explorer>,
@@ -216,6 +248,7 @@ impl Workspace {
         match event {
             ExplorerEvent::ShowDiagram(node) => self.show_diagram(node.clone(), cx),
             ExplorerEvent::ShowStructure(node) => self.show_structure(node.clone(), cx),
+            ExplorerEvent::OpenData(node) => self.open_data(node.clone(), window, cx),
             ExplorerEvent::Sql {
                 connection,
                 sql,
@@ -423,6 +456,16 @@ impl Render for Workspace {
                     Page::Diagram(diagram) => Tab::new()
                         .label(diagram.read(cx).title())
                         .prefix(Icon::new(Lucide::Workflow).small().ml_2().text_color(muted)),
+                    Page::Data(view) => {
+                        let source = view.read(cx).connection();
+                        let color = ds
+                            .get(source)
+                            .and_then(|c| c.color)
+                            .map_or(muted, |c| rgb(c.rgb()).into());
+                        Tab::new()
+                            .label(view.read(cx).title())
+                            .prefix(Icon::new(Lucide::Table).small().ml_2().text_color(color))
+                    }
                     Page::Structure(view) => Tab::new().label(view.read(cx).title()).prefix(
                         Icon::new(Lucide::TableProperties)
                             .small()
@@ -449,6 +492,7 @@ impl Render for Workspace {
             Some(Page::Console(console)) => console.clone().into_any_element(),
             Some(Page::Diagram(diagram)) => diagram.clone().into_any_element(),
             Some(Page::Structure(view)) => view.clone().into_any_element(),
+            Some(Page::Data(view)) => view.clone().into_any_element(),
             None => v_flex()
                 .size_full()
                 .items_center()

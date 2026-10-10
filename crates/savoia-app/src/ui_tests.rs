@@ -17,6 +17,7 @@ use savoia_store::{ConnectionStore, MemorySecrets};
 use crate::connection_form::ConnectionForm;
 use crate::console::QueryConsole;
 use crate::data_sources::{DataSources, DataSourcesEvent, RefreshState, SourceState};
+use crate::data_view::DataView;
 use crate::diagram::ErDiagram;
 use crate::explorer::{Explorer, NodeRef};
 use crate::history::HistoryPanel;
@@ -1108,4 +1109,83 @@ async fn postgres_completion_suggests_columns_and_joins(cx: &mut TestAppContext)
         Some("it_complete.customers c ON c.id = o.customer_id"),
         "{joins:?}"
     );
+}
+
+/// The data view pages through a table on the server, sorts and filters
+/// there, and refuses databases its session isn't connected to.
+#[gpui_kit::test]
+async fn postgres_data_view_pages_sorts_and_filters(cx: &mut TestAppContext) {
+    let Ok(url) = std::env::var("SAVOIA_PG_URL") else {
+        return;
+    };
+    let (ds, _) = save_and_connect(cx, &url);
+    let id = ds.read_with(cx, |ds, _| ds.connections()[0].id);
+    exec(
+        session_of(cx, &ds).expect("connected"),
+        "DROP SCHEMA IF EXISTS it_data CASCADE;
+         CREATE SCHEMA it_data;
+         CREATE TABLE it_data.players (id int PRIMARY KEY, name text, goals int);
+         INSERT INTO it_data.players
+           SELECT g, 'player ' || g, g % 7 FROM generate_series(1, 450) g;",
+    );
+    let node = |database: &str| NodeRef {
+        connection: id,
+        database: database.into(),
+        schema: "it_data".into(),
+        table: Some("players".into()),
+    };
+    let (_, view) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| DataView::new(ds.clone(), node("savoia"), window, cx))
+            })
+        })
+        .expect("window");
+    let rows = |cx: &mut TestAppContext, what: &str, want: (usize, bool)| {
+        wait_until(cx, what, |cx| {
+            view.read_with(cx, |v, cx| v.rows(cx)) == Some(want)
+        });
+    };
+    let first = |cx: &mut TestAppContext| {
+        view.read_with(cx, |v, cx| {
+            let grid = v.grid().unwrap();
+            let row = grid.read(cx).delegate().row(0).clone();
+            row.iter()
+                .map(|c| c.as_deref().unwrap_or("NULL").to_owned())
+                .collect::<Vec<_>>()
+        })
+    };
+    rows(cx, "the first page", (200, true));
+    assert_eq!(first(cx), ["1", "player 1", "1"]);
+    view.update(cx, |v, cx| v.load_next(cx));
+    rows(cx, "the second page", (400, true));
+    view.update(cx, |v, cx| v.load_next(cx));
+    rows(cx, "the last page", (450, false));
+
+    // Sorting starts over, on the server: ties on goals keep key order.
+    view.update(cx, |v, cx| v.sort_by(Some((2, true)), cx));
+    rows(cx, "the sorted page", (200, true));
+    assert_eq!(first(cx), ["6", "player 6", "6"]);
+
+    view.update(cx, |v, cx| {
+        v.push_filter(
+            savoia_core::data_query::Filter {
+                column: "name".into(),
+                op: savoia_core::data_query::Op::Contains,
+                value: "R 44".into(),
+            },
+            cx,
+        )
+    });
+    rows(cx, "the filtered rows", (11, false));
+    assert!(view.read_with(cx, |v, _| v.error().is_none()));
+
+    let (_, other) = cx
+        .update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| DataView::new(ds.clone(), node("postgres"), window, cx))
+            })
+        })
+        .expect("window");
+    assert!(other.read_with(cx, |v, _| v.query().is_none()));
 }

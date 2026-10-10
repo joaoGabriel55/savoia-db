@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use savoia_core::{
-    AppError, AppResult, Catalog, Connection, ConnectionConfig, Driver, Endpoint, Engine,
-    QueryEvent, QueryHandle, SchemaNode, Secrets, ServerInfo, TableInfo,
+    AppError, AppResult, Catalog, ColumnMeta, Connection, ConnectionConfig, Driver, Endpoint,
+    Engine, QueryEvent, QueryHandle, Row, SchemaNode, Secrets, ServerInfo, TableInfo,
 };
 use savoia_mysql::MysqlDriver;
 use savoia_pg::PgDriver;
@@ -296,6 +296,33 @@ impl Session {
         Ok(RunningQuery {
             inner: Some((handle, guard)),
         })
+    }
+}
+
+impl Session {
+    /// Runs one statement to its end and returns its result set: for small,
+    /// bounded reads such as a data view's page. Runs on the I/O runtime.
+    pub async fn fetch(&self, sql: String) -> AppResult<(Arc<[ColumnMeta]>, Vec<Row>)> {
+        let mut query = self.execute(sql).await?;
+        let (mut columns, mut rows): (Arc<[ColumnMeta]>, Vec<Row>) = (Arc::new([]), Vec::new());
+        while let Some(event) = query.next().await {
+            match event? {
+                QueryEvent::Columns(meta) => columns = meta,
+                QueryEvent::Rows(page) => rows.extend(page),
+                QueryEvent::Done { .. } => {}
+            }
+        }
+        Ok((columns, rows))
+    }
+
+    /// Whether `database` is the one this session's own connection is on,
+    /// where queries run. Always true on MySQL, which reaches every database.
+    pub fn runs_in(&self, database: &str, engine: Engine) -> bool {
+        engine == Engine::Mysql
+            || self
+                .catalog()
+                .database(database)
+                .is_some_and(|d| d.is_current)
     }
 }
 

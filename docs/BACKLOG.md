@@ -35,7 +35,7 @@ A no-SQL view per table that browses, edits and queries data, joins included. Se
 
 | # | Task | Done when | Est. |
 |---|------|-----------|------|
-| 3.1 | [ ] Browse | "Open data" opens a data view tab: keyset (or `LIMIT/OFFSET`) pages of 200, header click sorts on the server, filter chips build the `WHERE`; "View SQL" / "Open in console". | 2 days |
+| 3.1 | [x] Browse | "Open data" opens a data view tab: keyset (or `LIMIT/OFFSET`) pages of 200, header click sorts on the server, filter chips build the `WHERE`; "View SQL" / "Open in console". | 2 days |
 | 3.2 | [ ] Edit, insert, delete | Edits on key-bearing tables are held as pending changes, highlighted; "Review SQL" shows the statements; Commit runs them in one transaction with a 1-row check each, Discard drops them. | 3–4 days |
 | 3.3 | [ ] Relationship columns | "+ Column" adds lookups through many-to-one FKs (LEFT JOIN, chained paths), summary columns for one-to-many (count/sum/min/max/avg/list), drill-down to children, an FK value picker, and "Join another table…" for undeclared relations. | 3–4 days |
 | 3.4 | [~] Read-only mode | Drivers already set `default_transaction_read_only` (PG) and read-only sessions (MySQL). Left: disable edit UI and show a read-only badge. | ¼ day |
