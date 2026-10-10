@@ -65,6 +65,17 @@ minimum-system-version = "11.0"
 
 [package.metadata.packager.deb]
 section = "database"
+# Linked (xcb, xkbcommon) or loaded at runtime by GPUI (fontconfig, Vulkan,
+# Wayland); a minimal install lacks some of them.
+depends = [
+  "libxcb1",
+  "libxkbcommon0",
+  "libxkbcommon-x11-0",
+  "libfontconfig1",
+  "libvulkan1",
+  "libwayland-client0",
+  "libwayland-cursor0",
+]
 
 [package.metadata.packager.nsis]
 installer-mode = "currentUser"
@@ -78,3 +89,15 @@ assets = [
   { source = "assets/icons/icon-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/savoia-studio.png", mode = "644" },
   { source = "crates/savoia-app/savoia-studio.desktop", dest = "/usr/share/applications/savoia-studio.desktop", mode = "644" },
 ]
+
+# Everything the deb depends on, by library name rather than package name so
+# Fedora and openSUSE both resolve it. RPM's own scan finds the linked ones
+# too, but not the ones GPUI loads at runtime.
+[package.metadata.generate-rpm.requires]
+"libxcb.so.1()(64bit)" = "*"
+"libxkbcommon.so.0()(64bit)" = "*"
+"libxkbcommon-x11.so.0()(64bit)" = "*"
+"libfontconfig.so.1()(64bit)" = "*"
+"libvulkan.so.1()(64bit)" = "*"
+"libwayland-client.so.0()(64bit)" = "*"
+"libwayland-cursor.so.0()(64bit)" = "*"

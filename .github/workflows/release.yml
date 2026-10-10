@@ -85,10 +85,23 @@ jobs:
               || { echo "::error::CARGO_PACKAGER_SIGN_PRIVATE_KEY is unset; see docs/RELEASING.md"; exit 1; }
             export SAVOIA_UPDATER_PUBKEY="$(cat updater.pub)"
           fi
+          # AppImage: xz instead of the default, for the 15 MB budget.
+          export LDAI_COMP=xz
           cargo packager --release --formats ${{ matrix.formats }}
-      - name: RPM
+      - name: RPM, and xz for the .deb
         if: runner.os == 'Linux'
-        run: cargo generate-rpm -p crates/savoia-app -o target/packages/
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cargo generate-rpm -p crates/savoia-app -o target/packages/ --payload-compress xz
+          for deb in target/packages/*.deb; do
+            scripts/repack-deb.sh "$deb"
+            # The repack changed the bytes; sign them again when a key is set.
+            rm -f "$deb.sig"
+            if [ -n "$CARGO_PACKAGER_SIGN_PRIVATE_KEY" ]; then cargo packager signer sign "$deb"; fi
+          done
+          ls -la target/packages
       - name: Name the assets
         shell: bash
         working-directory: target/packages
